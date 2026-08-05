@@ -14,20 +14,69 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # -----------------------------------------------------------------------------
-# 1. FUNCIÓN DE LIMPIEZA BASE (EXACTA A TU CÓDIGO DE COLAB)
+# CONFIGURACIÓN DE PÁGINA STREAMLIT
 # -----------------------------------------------------------------------------
-def procesar_y_limpiar_dataframe(df_in):
-    df_clean = df_in.copy()
+st.set_page_config(
+    page_title="LogiSense AI — Analítica Logística y Fletes",
+    page_icon="🚚",
+    layout="wide"
+)
 
-    # Normalización de encabezados (quita espacios extra al inicio/final)
-    df_clean.columns = [str(h).strip() for h in df_clean.columns]
+st.title("🚚 LogiSense AI — Analítica Logística y Fletes")
+
+# -----------------------------------------------------------------------------
+# 1. CARGA Y LIMPIEZA DE DATOS (BASADO EN TU CÓDIGO COLAB)
+# -----------------------------------------------------------------------------
+SHEET_ID = "1x-scvFNxjcIkFfjaZI0YrBpa7ttAWL8HpXffsREMKok"
+
+CONFIG_HOJAS = {
+    'ENERO': 430,
+    'FEBRERO': 408,
+    'MARZO': 370,
+    'ABRIL': 662,
+    'MAYO': 394,
+    'JUNIO': 398,
+    'JULIO': 387
+}
+
+@st.cache_data(ttl=600)
+def cargar_y_limpiar_datos():
+    # Conexión usando Streamlit Secrets
+    credentials = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    )
+    gc = gspread.authorize(credentials)
+    sh = gc.open_by_key(SHEET_ID)
+
+    lista_dfs = []
+
+    for nombre_hoja, limite_fila in CONFIG_HOJAS.items():
+        try:
+            hoja = sh.worksheet(nombre_hoja)
+            data = hoja.get_values(f"A1:AZ{limite_fila}")
+
+            if len(data) > 1:
+                # Quitamos espacios al principio y final de cada nombre de columna
+                headers = [str(h).strip() for h in data[0]]
+                rows = data[1:]
+
+                df_temp = pd.DataFrame(rows, columns=headers)
+                df_temp['MES_ORIGEN'] = nombre_hoja
+                lista_dfs.append(df_temp)
+        except Exception as e:
+            st.warning(f"Error cargando la hoja {nombre_hoja}: {e}")
+
+    if not lista_dfs:
+        return pd.DataFrame()
+
+    df_clean = pd.concat(lista_dfs, ignore_index=True)
+
+    # Normalizar encabezados (quitar espacios invisibles y saltos de línea)
+    df_clean.columns = [' '.join(str(c).replace('\n', ' ').split()).strip().upper() for c in df_clean.columns]
 
     # Asignación de la Semana de Análisis
-    col_sem = (
-        'SEMANA CALENDARIO FACTURA'
-        if 'SEMANA CALENDARIO FACTURA' in df_clean.columns
-        else 'SEMANA CALENDARIO PEDIDO'
-    )
+    col_sem = 'SEMANA CALENDARIO FACTURA' if 'SEMANA CALENDARIO FACTURA' in df_clean.columns else 'SEMANA CALENDARIO PEDIDO'
     if col_sem in df_clean.columns:
         df_clean['SEMANA_ANALISIS'] = pd.to_numeric(df_clean[col_sem], errors='coerce')
     else:
@@ -53,13 +102,43 @@ def procesar_y_limpiar_dataframe(df_in):
 
     return df_clean
 
+# Cargar la base de datos
+with st.spinner("⏳ Cargando y consolidando datos de la base logística..."):
+    df = cargar_y_limpiar_datos()
+
+if df.empty:
+    st.error("No se pudieron obtener datos del Google Sheet. Verifica los permisos del Service Account.")
+    st.stop()
 
 # -----------------------------------------------------------------------------
-# 2. MOTOR COMPARATIVO DE FLETES
+# CONTROL DE SEMANAS EN SIDEBAR
 # -----------------------------------------------------------------------------
-def generar_comparativo_semanal(df_datos, sem_a, sem_b):
-    df_a = df_datos[df_datos['SEMANA_ANALISIS'] == sem_a]
-    df_b = df_datos[df_datos['SEMANA_ANALISIS'] == sem_b]
+semanas_disponibles = sorted([int(s) for s in df['SEMANA_ANALISIS'].dropna().unique()])
+if not semanas_disponibles:
+    semanas_disponibles = [1, 2]
+
+col_s1, col_s2 = st.sidebar.columns(2)
+sem_a = col_s1.selectbox("Semana Base (A)", semanas_disponibles, index=0)
+sem_b = col_s2.selectbox("Semana Comparar (B)", semanas_disponibles, index=min(1, len(semanas_disponibles)-1))
+
+# -----------------------------------------------------------------------------
+# TABS PRINCIPALES
+# -----------------------------------------------------------------------------
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Motor Comparativo",
+    "🚨 Auditoría de Anomalías",
+    "📝 Prompt Ejecutivo",
+    "💬 Habla con tus Fletes"
+])
+
+# -----------------------------------------------------------------------------
+# TAB 1: MOTOR COMPARATIVO
+# -----------------------------------------------------------------------------
+with tab1:
+    st.subheader(f"📊 Comparativo: Semana {sem_a} vs Semana {sem_b}")
+
+    df_a = df[df['SEMANA_ANALISIS'] == sem_a]
+    df_b = df[df['SEMANA_ANALISIS'] == sem_b]
 
     conceptos = [
         'FLETE FACTURA',
@@ -76,7 +155,7 @@ def generar_comparativo_semanal(df_datos, sem_a, sem_b):
         m_b = df_b[conc].sum() if conc in df_b.columns else 0.0
         dif = m_b - m_a
 
-        # Corrección de variación para evitar +0.0% cuando m_a es 0
+        # Corrección del cálculo de % de variación
         if m_a > 0:
             pct = ((m_b - m_a) / m_a) * 100
             str_pct = f"{pct:+.1f}%"
@@ -93,7 +172,9 @@ def generar_comparativo_semanal(df_datos, sem_a, sem_b):
             'Variación (%)': str_pct
         })
 
-    # Métricas de Costo por KG y Costo por Tarima
+    st.table(pd.DataFrame(filas))
+
+    # Métricas clave
     kg_a = df_a['KG MOVIDOS'].sum() if 'KG MOVIDOS' in df_a.columns else 0
     kg_b = df_b['KG MOVIDOS'].sum() if 'KG MOVIDOS' in df_b.columns else 0
 
@@ -110,7 +191,118 @@ def generar_comparativo_semanal(df_datos, sem_a, sem_b):
     c_t_a = (tot_a / tar_a) if tar_a > 0 else 0.0
     c_t_b = (tot_b / tar_b) if tar_b > 0 else 0.0
 
-    dif_kg = c_kg_b - c_kg_a
-    dif_t = c_t_b - c_t_a
+    m1, m2 = st.columns(2)
+    m1.metric("Costo / KG (Semana B)", f"${c_kg_b:,.2f}", delta=f"{c_kg_b - c_kg_a:,.2f}")
+    m2.metric("Costo / Tarima (Semana B)", f"${c_t_b:,.2f}", delta=f"{c_t_b - c_t_a:,.2f}")
 
-    return pd.DataFrame(filas), c_kg_b, dif_kg, c_t_b, dif_t
+# -----------------------------------------------------------------------------
+# TAB 2: AUDITORÍA DE ANOMALÍAS
+# -----------------------------------------------------------------------------
+with tab2:
+    st.subheader(f"🚨 Diagnóstico Estadístico: Semana {sem_a} vs Semana {sem_b}")
+
+    media_total_a = df_a['TOTAL FLETE'].mean() if len(df_a) > 0 else 0
+    media_total_b = df_b['TOTAL FLETE'].mean() if len(df_b) > 0 else 0
+
+    media_flete_a = df_a['FLETE FACTURA'].mean() if len(df_a) > 0 else 0
+    media_flete_b = df_b['FLETE FACTURA'].mean() if len(df_b) > 0 else 0
+
+    col_diag1, col_diag2, col_diag3 = st.columns(3)
+    col_diag1.metric("Viajes Realizados", f"Sem {sem_b}: {len(df_b)}", delta=f"{len(df_b) - len(df_a)} vs Sem {sem_a}")
+    col_diag2.metric("Promedio Costo Total / Viaje", f"${media_total_b:,.2f}", delta=f"${media_total_b - media_total_a:,.2f}")
+    col_diag3.metric("Promedio Flete Factura / Viaje", f"${media_flete_b:,.2f}", delta=f"${media_flete_b - media_flete_a:,.2f}")
+
+    viajes_altos = df_b[df_b['TOTAL FLETE'] > media_total_a].copy() if media_total_a > 0 else pd.DataFrame()
+
+    if not viajes_altos.empty:
+        viajes_altos['Diferencia vs Media A'] = viajes_altos['TOTAL FLETE'] - media_total_a
+        viajes_altos = viajes_altos.sort_values(by='TOTAL FLETE', ascending=False)
+
+        st.warning(f"🚨 Auditoría: {len(viajes_altos)} viajes en la Semana {sem_b} superan la media de la Semana {sem_a} (${media_total_a:,.2f})")
+
+        cols_detalle = ['MES_ORIGEN', 'CLIENTE', 'TRANSPORTISTA', 'CIUDAD DESTINO', 'FLETE FACTURA', 'DEMORAS Y ESTADIAS', 'TOTAL FLETE', 'Diferencia vs Media A']
+        cols_existentes = [c for c in cols_detalle if c in viajes_altos.columns]
+
+        st.dataframe(viajes_altos[cols_existentes].head(10), use_container_width=True)
+    else:
+        st.success("✅ No se detectaron viajes atípicos por encima del promedio base.")
+
+# -----------------------------------------------------------------------------
+# TAB 3: PROMPT EJECUTIVO
+# -----------------------------------------------------------------------------
+with tab3:
+    st.subheader("📝 Generador de Prompt para Inteligencia Artificial")
+
+    tot_a = df_a['TOTAL FLETE'].sum() if 'TOTAL FLETE' in df_a.columns else 0
+    tot_b = df_b['TOTAL FLETE'].sum() if 'TOTAL FLETE' in df_a.columns else 0
+    var_tot = ((tot_b - tot_a) / tot_a * 100) if tot_a > 0 else 0
+    media_a = df_a['TOTAL FLETE'].mean() if len(df_a) > 0 else 0
+
+    viajes_altos = df_b[df_b['TOTAL FLETE'] > media_a].sort_values(by='TOTAL FLETE', ascending=False) if len(df_b) > 0 and media_a > 0 else pd.DataFrame()
+
+    top_anomalias = []
+    if not viajes_altos.empty:
+        for _, r in viajes_altos.head(5).iterrows():
+            top_anomalias.append(
+                f"- Cliente: {r.get('CLIENTE', 'N/A')}, Transportista: {r.get('TRANSPORTISTA', 'N/A')}, "
+                f"Destino: {r.get('CIUDAD DESTINO', 'N/A')}, Monto Total: ${r.get('TOTAL FLETE', 0):,.2f}, "
+                f"Demoras/Estadías: ${r.get('DEMORAS Y ESTADIAS', 0):,.2f}"
+            )
+
+    str_anomalias = "\n".join(top_anomalias) if top_anomalias else "No se detectaron viajes atípicos."
+
+    prompt_texto = f"""Actúa como un Gerente Senior de Logística y Cadena de Suministro.
+Analiza la siguiente variación semanal de fletes e imprevistos financieros y genera un reporte ejecutivo.
+
+DATOS COMPARATIVOS:
+- Periodo Base: Semana {sem_a} | Gasto Total: ${tot_a:,.2f} | Costo Promedio por Viaje: ${media_a:,.2f}
+- Periodo Actual: Semana {sem_b} | Gasto Total: ${tot_b:,.2f}
+- Variación del Gasto Total: {var_tot:+.2f}%
+
+TOP VIAJES ATÍPICOS EN LA SEMANA {sem_b}:
+{str_anomalias}
+
+ESTRUCTURA DEL REPORTE SOLICITADA:
+1. 📌 Resumen Ejecutivo (2-3 oraciones)
+2. 🚨 Alertas Operativas
+3. 💡 Recomendaciones de Negocio (2 acciones concretas)"""
+
+    st.code(prompt_texto, language="markdown")
+
+# -----------------------------------------------------------------------------
+# TAB 4: CHAT CON TUS FLETES
+# -----------------------------------------------------------------------------
+with tab4:
+    st.subheader("💬 Consulta la base de datos logística")
+
+    pregunta = st.text_input("Escribe tu duda (ej. ¿Cuál es el transportista con el costo por tarima más alto?, ¿Cuántas demoras tuvimos?):")
+
+    if pregunta:
+        query = pregunta.lower()
+
+        if "tarima" in query or "costo por tarima" in query:
+            col_t = 'COSTO POR TARIMA' if 'COSTO POR TARIMA' in df.columns else 'TARIMA'
+            if col_t in df.columns and 'TRANSPORTISTA' in df.columns:
+                agrupado = df.groupby('TRANSPORTISTA')[col_t].mean()
+                top_transp = agrupado.idxmax()
+                max_costo = agrupado.max()
+                st.success(f"🚛 El transportista con el costo por tarima promedio más alto es **{top_transp}** con **${max_costo:,.2f}** por tarima.")
+            else:
+                st.warning("⚠️ No se encontró la columna 'COSTO POR TARIMA' o 'TRANSPORTISTA'.")
+
+        elif "demora" in query or "estadía" in query or "estadia" in query:
+            if 'DEMORAS Y ESTADIAS' in df.columns:
+                df_demoras = df[df['DEMORAS Y ESTADIAS'] > 0]
+                tot_demoras = df_demoras['DEMORAS Y ESTADIAS'].sum()
+                num_viajes = len(df_demoras)
+                st.warning(f"🚨 Se registraron **{num_viajes} viajes** con demoras/estadías, sumando un sobrecosto de **${tot_demoras:,.2f}**.")
+            else:
+                st.warning("⚠️ No se encontró la columna 'DEMORAS Y ESTADIAS'.")
+
+        elif "viaje" in query or "total" in query:
+            total_v = len(df)
+            gasto_total = df['TOTAL FLETE'].sum() if 'TOTAL FLETE' in df.columns else 0
+            st.info(f"📊 Se registran **{total_v} viajes totales** con un gasto acumulado de **${gasto_total:,.2f}**.")
+
+        else:
+            st.info("💡 Sugerencia de consultas: 'costo por tarima', 'demoras' o 'total de viajes'.")
