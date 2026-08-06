@@ -119,6 +119,10 @@ if archivo_subido is not None:
         opciones_tipo_trans = sorted([str(x) for x in df_raw[col_tipo_trans].dropna().unique()]) if col_tipo_trans in df_raw.columns else []
         tipo_trans_sel = st.sidebar.multiselect("Tipo de Transporte", opciones_tipo_trans, default=[])
 
+        col_embarque = 'TIPO DE EMBARQUE'
+        opciones_embarque = sorted([str(x) for x in df_raw[col_embarque].dropna().unique()]) if col_embarque in df_raw.columns else []
+        embarque_sel = st.sidebar.multiselect("Tipo de Embarque", opciones_embarque, default=[])
+
         col_origen = 'ORIGEN DE VIAJE'
         opciones_origen = sorted([str(x) for x in df_raw[col_origen].dropna().unique()]) if col_origen in df_raw.columns else []
         origen_sel = st.sidebar.multiselect("Origen", opciones_origen, default=[])
@@ -135,6 +139,8 @@ if archivo_subido is not None:
             df = df[df[col_transp].astype(str).isin(transp_sel)]
         if tipo_trans_sel and col_tipo_trans in df.columns:
             df = df[df[col_tipo_trans].astype(str).isin(tipo_trans_sel)]
+        if embarque_sel and col_embarque in df.columns:
+            df = df[df[col_embarque].astype(str).isin(embarque_sel)]
         if origen_sel and col_origen in df.columns:
             df = df[df[col_origen].astype(str).isin(origen_sel)]
         if destino_sel and col_destino in df.columns:
@@ -272,7 +278,7 @@ if archivo_subido is not None:
                     })
                 st.table(pd.DataFrame(filas))
 
-            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (MODIFICADA)
+            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE
             with tab2:
                 df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
                 df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
@@ -290,7 +296,6 @@ if archivo_subido is not None:
                     'TOTAL FLETE': 'sum'
                 }).reset_index()
 
-                # Renombrar columnas para la visualización exacta solicitada
                 df_b_grouped = df_b_grouped.rename(columns={
                     'ORIGEN DE VIAJE': 'Origen',
                     'DESTINO DE EMBARQUE': 'Destino',
@@ -321,7 +326,7 @@ DATOS COMPARATIVOS ({modo_periodo.upper()} {per_a} vs {modo_periodo.upper()} {pe
 - Periodo Base ({modo_periodo} {per_a}): Viajes Reales: {viajes_a} | KG Movidos: {kg_a:,.0f} | Tarimas: {tar_a:,.0f} | Costo Puro/KG: ${costo_kg_a:,.2f} | Costo Puro/Tarima: ${costo_tar_a:,.2f} | Tarifa Media/Viaje: ${media_viaje_a:,.2f} | Gasto Operación Total: ${tot_a:,.2f}
 - Periodo Actual ({modo_periodo} {per_b}): Viajes Reales: {viajes_b} | KG Movidos: {kg_b:,.0f} | Tarimas: {tar_b:,.0f} | Costo Puro/KG: ${costo_kg_b:,.2f} | Costo Puro/Tarima: ${costo_tar_b:,.2f} | Tarifa Media/Viaje: ${media_viaje_b:,.2f} | Gasto Operación Total: ${tot_b:,.2f}
 - Variación del Gasto Total de la Operación: {var_tot:+.2f}%
-- Filtros Operativos -> Cliente: {clientes_sel if clientes_sel else 'Todos'} | Transportista: {transp_sel if transp_sel else 'Todos'} | Tipo de Transporte: {tipo_trans_sel if tipo_trans_sel else 'Todos'} | Origen: {origen_sel if origen_sel else 'Todos'} | Destino: {destino_sel if destino_sel else 'Todos'}
+- Filtros Operativos -> Cliente: {clientes_sel if clientes_sel else 'Todos'} | Transportista: {transp_sel if transp_sel else 'Todos'} | Tipo de Transporte: {tipo_trans_sel if tipo_trans_sel else 'Todos'} | Tipo de Embarque: {embarque_sel if embarque_sel else 'Todos'} | Origen: {origen_sel if origen_sel else 'Todos'} | Destino: {destino_sel if destino_sel else 'Todos'}
 
 ESTRUCTURA DEL REPORTE SOLICITADA:
 1. 📌 Resumen Ejecutivo
