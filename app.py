@@ -123,7 +123,8 @@ if archivo_subido is not None:
         opciones_embarque = sorted([str(x) for x in df_raw[col_embarque].dropna().unique()]) if col_embarque in df_raw.columns else []
         embarque_sel = st.sidebar.multiselect("Tipo de Embarque", opciones_embarque, default=[])
 
-        col_origen = 'ORIGEN DE VIAJE'
+        # CORRECCIÓN DE NOMBRE DE COLUMNA AQUÍ
+        col_origen = 'ORIGEN'
         opciones_origen = sorted([str(x) for x in df_raw[col_origen].dropna().unique()]) if col_origen in df_raw.columns else []
         origen_sel = st.sidebar.multiselect("Origen", opciones_origen, default=[])
 
@@ -280,11 +281,10 @@ if archivo_subido is not None:
 
                 st.table(pd.DataFrame(filas))
 
-                # --- MEJORA: SECCIÓN CON FILTRO PROPIO Y GRÁFICO DE LÍNEAS ---
+                # --- SECCIÓN: FILTRO PROPIO Y GRÁFICO DE LÍNEAS ---
                 st.markdown("---")
                 st.markdown("### 📈 Análisis de Tendencia Avanzado")
                 
-                # Mapeo de opciones amigables a sus variables reales correspondientes
                 dicc_metricas = {
                     "KG Movidos": kg_a, "Tarimas": tar_a,
                     "Flete Factura ($)": flete_puro_a, "Maniobras ($)": df_a['MANIOBRAS'].sum() if 'MANIOBRAS' in df_a.columns else 0,
@@ -303,32 +303,29 @@ if archivo_subido is not None:
                     "Total Flete ($)": tot_b, "Costo por KG ($)": costo_kg_b, "Costo por Tarima ($)": costo_tar_b
                 }
 
-                # Componente de filtro interno para el gráfico
                 metrica_seleccionada = st.selectbox(
                     "🔍 Selecciona la métrica específica que deseas graficar:",
                     list(dicc_metricas.keys())
                 )
 
-                # Construcción del dataset de la tendencia de líneas
                 datos_tendencia = {
                     'Periodo de Análisis': [f"{modo_periodo} {per_a}", f"{modo_periodo} {per_b}"],
                     metrica_seleccionada: [dicc_metricas[metrica_seleccionada], dicc_metricas_b[metrica_seleccionada]]
                 }
                 df_tendencia = pd.DataFrame(datos_tendencia).set_index('Periodo de Análisis')
 
-                # Renderizar gráfico interactivo de líneas nativo de Streamlit
                 st.line_chart(df_tendencia, use_container_width=True)
-                # -------------------------------------------------------------
 
-            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE
+            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (CORREGIDA COLUMNA 'ORIGEN')
             with tab2:
                 df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
                 df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
                 
+                # Agrupación usando la columna correcta 'ORIGEN'
                 df_b_grouped = df_b_validos.groupby('ID_VIAJE_UNICO').agg({
                     'CLIENTE': 'first',
                     'TRANSPORTISTA': 'first',
-                    'ORIGEN DE VIAJE': 'first',
+                    'ORIGEN': 'first',  # <-- Ajustado a la columna correcta
                     'DESTINO DE EMBARQUE': 'first',
                     'TARIMAS TOTALES POR VIAJE': 'sum',
                     'TIPO DE TRANSPORTE': 'first',
@@ -342,7 +339,7 @@ if archivo_subido is not None:
                 }).reset_index()
 
                 df_b_grouped = df_b_grouped.rename(columns={
-                    'ORIGEN DE VIAJE': 'Origen',
+                    'ORIGEN': 'Origen',
                     'DESTINO DE EMBARQUE': 'Destino',
                     'TARIMAS TOTALES POR VIAJE': 'Tarimas',
                     'TIPO DE TRANSPORTE': 'Unidad'
