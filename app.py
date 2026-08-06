@@ -278,7 +278,7 @@ if archivo_subido is not None:
                     })
                 st.table(pd.DataFrame(filas))
 
-            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE
+            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (CON FORMATOS MONETARIOS Y MÁS GASTOS)
             with tab2:
                 df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
                 df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
@@ -292,7 +292,10 @@ if archivo_subido is not None:
                     'TIPO DE TRANSPORTE': 'first',
                     'KG MOVIDOS': 'sum',
                     'FLETE FACTURA': 'sum',
+                    'MANIOBRAS': 'sum',
+                    'REPARTOS': 'sum',
                     'DEMORAS Y ESTADIAS': 'sum',
+                    'OTROS': 'sum',
                     'TOTAL FLETE': 'sum'
                 }).reset_index()
 
@@ -310,8 +313,16 @@ if archivo_subido is not None:
                     viajes_altos['Diferencia vs Media Base'] = viajes_altos['FLETE FACTURA'] - media_ref
                     viajes_altos = viajes_altos.sort_values(by='FLETE FACTURA', ascending=False)
 
+                    # Formatear columnas numéricas monetarias a strings legibles ($#,##0.00)
+                    cols_dinero = ['FLETE FACTURA', 'MANIOBRAS', 'REPARTOS', 'DEMORAS Y ESTADIAS', 'OTROS', 'TOTAL FLETE', 'Diferencia vs Media Base']
+                    df_visualizacion = viajes_altos.copy()
+                    
+                    for col in cols_dinero:
+                        if col in df_visualizacion.columns:
+                            df_visualizacion[col] = df_visualizacion[col].apply(lambda x: f"${x:,.2f}")
+
                     st.warning(f"🚨 Auditoría: **{len(viajes_altos)} viajes únicos** en el {modo_periodo} {per_b} superan la tarifa flete base promedio del {modo_periodo} {per_a} (${media_ref:,.2f})")
-                    st.dataframe(viajes_altos, use_container_width=True)
+                    st.dataframe(df_visualizacion, use_container_width=True, hide_index=True)
                 else:
                     st.success(f"✅ No se encontraron fletes en el {modo_periodo} {per_b} que superen la media del {modo_periodo} {per_a}.")
 
