@@ -108,10 +108,6 @@ if archivo_subido is not None:
         # BARRA LATERAL: FILTROS DE ANÁLISIS
         st.sidebar.header("🔍 Filtros Operativos")
 
-        col_embarque = 'TIPO DE EMBARQUE'
-        opciones_embarque = ["Todos"] + sorted([str(x) for x in df_raw[col_embarque].dropna().unique()]) if col_embarque in df_raw.columns else ["Todos"]
-        embarque_sel = st.sidebar.selectbox("Tipo de Embarque (TR1, TR2, etc.)", opciones_embarque)
-
         col_cliente = 'CLIENTE'
         opciones_cliente = sorted([str(x) for x in df_raw[col_cliente].dropna().unique()]) if col_cliente in df_raw.columns else []
         clientes_sel = st.sidebar.multiselect("Cliente(s)", opciones_cliente, default=[])
@@ -121,19 +117,17 @@ if archivo_subido is not None:
         transp_sel = st.sidebar.multiselect("Transportista(s)", opciones_transp, default=[])
 
         col_tipo_trans = 'TIPO DE TRANSPORTE'
-        opciones_tipo_trans = ["Todos"] + sorted([str(x) for x in df_raw[col_tipo_trans].dropna().unique()]) if col_tipo_trans in df_raw.columns else ["Todos"]
-        tipo_trans_sel = st.sidebar.selectbox("Tipo de Transporte", opciones_tipo_trans)
+        opciones_tipo_trans = sorted([str(x) for x in df_raw[col_tipo_trans].dropna().unique()]) if col_tipo_trans in df_raw.columns else []
+        tipo_trans_sel = st.sidebar.multiselect("Tipo de Transporte", opciones_tipo_trans, default=[])
 
         # Aplicar filtros
         df = df_raw.copy()
-        if embarque_sel != "Todos" and col_embarque in df.columns:
-            df = df[df[col_embarque].astype(str) == embarque_sel]
         if clientes_sel and col_cliente in df.columns:
             df = df[df[col_cliente].astype(str).isin(clientes_sel)]
         if transp_sel and col_transp in df.columns:
             df = df[df[col_transp].astype(str).isin(transp_sel)]
-        if tipo_trans_sel != "Todos" and col_tipo_trans in df.columns:
-            df = df[df[col_tipo_trans].astype(str) == tipo_trans_sel]
+        if tipo_trans_sel and col_tipo_trans in df.columns:
+            df = df[df[col_tipo_trans].astype(str).isin(tipo_trans_sel)]
 
         # SELECCIÓN DE PERIODO
         st.sidebar.markdown("---")
@@ -146,7 +140,6 @@ if archivo_subido is not None:
             label_a, label_b = "Semana A (Base)", "Semana B (Actual)"
         else:
             col_periodo = 'MES FACTURA'
-            # CORRECCIÓN AQUÍ: Forzamos el orden basándonos estrictamente en NOMBRES_MESES 
             meses_existentes = df[col_periodo].dropna().unique()
             periodos = [m for m in NOMBRES_MESES if m in meses_existentes]
             label_a, label_b = "Mes A (Base)", "Mes B (Actual)"
@@ -285,6 +278,7 @@ if archivo_subido is not None:
                     'EMBARQUE': 'first',
                     'CLIENTE': 'first',
                     'TRANSPORTISTA': 'first',
+                    'TIPO DE TRANSPORTE': 'first',
                     'KG MOVIDOS': 'sum',
                     'TARIMAS TOTALES POR VIAJE': 'sum',
                     'FLETE FACTURA': 'sum',
@@ -312,10 +306,10 @@ if archivo_subido is not None:
 Analiza la siguiente variación de fletes e imprevistos financieros y genera un reporte ejecutivo.
 
 DATOS COMPARATIVOS ({modo_periodo.upper()} {per_a} vs {modo_periodo.upper()} {per_b}):
-- Periodo Base ({modo_periodo} {per_a}): Viajes Reales: {viajes_a} | KG Movidos: {kg_a:,.0f} | Tarimas: {tar_a:,.0f} | Costo Puro/KG: ${costo_kg_a:,.2f} | Costo Puro/Tarima: ${costo_tar_a:,.2f} | Tarifa Media/Viaje: ${media_viaje_a:,.2f} | Gasto Operación Total: ${tot_a:,.2f}
-- Periodo Actual ({modo_periodo} {per_b}): Viajes Reales: {viajes_b} | KG Movidos: {kg_b:,.0f} | Tarimas: {tar_b:,.0f} | Costo Puro/KG: ${costo_kg_b:,.2f} | Costo Puro/Tarima: ${costo_tar_b:,.2f} | Tarifa Media/Viaje: ${media_viaje_b:,.2f} | Gasto Operación Total: ${tot_b:,.2f}
+- Periodo Base ({modo_periodo} {per_a}): Viajes Reales: {viajes_a} | KG Movidos: {kg_a:,.0f} | Tarimas Totales: {tar_a:,.0f} | Costo Puro/KG: ${costo_kg_a:,.2f} | Costo Puro/Tarima: ${costo_tar_a:,.2f} | Tarifa Media/Viaje: ${media_viaje_a:,.2f} | Gasto Operación Total: ${tot_a:,.2f}
+- Periodo Actual ({modo_periodo} {per_b}): Viajes Reales: {viajes_b} | KG Movidos: {kg_b:,.0f} | Tarimas Totales: {tar_b:,.0f} | Costo Puro/KG: ${costo_kg_b:,.2f} | Costo Puro/Tarima: ${costo_tar_b:,.2f} | Tarifa Media/Viaje: ${media_viaje_b:,.2f} | Gasto Operación Total: ${tot_b:,.2f}
 - Variación del Gasto Total de la Operación: {var_tot:+.2f}%
-- Filtros Operativos -> Embarque: {embarque_sel} | Cliente: {clientes_sel if clientes_sel else 'Todos'} | Transportista: {transp_sel if transp_sel else 'Todos'}
+- Filtros Operativos -> Cliente: {clientes_sel if clientes_sel else 'Todos'} | Transportista: {transp_sel if transp_sel else 'Todos'} | Tipo de Transporte: {tipo_trans_sel if tipo_trans_sel else 'Todos'}
 
 ESTRUCTURA DEL REPORTE SOLICITADA:
 1. 📌 Resumen Ejecutivo
