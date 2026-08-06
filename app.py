@@ -120,6 +120,14 @@ if archivo_subido is not None:
         opciones_tipo_trans = sorted([str(x) for x in df_raw[col_tipo_trans].dropna().unique()]) if col_tipo_trans in df_raw.columns else []
         tipo_trans_sel = st.sidebar.multiselect("Tipo de Transporte", opciones_tipo_trans, default=[])
 
+        col_origen = 'ORIGEN'
+        opciones_origen = sorted([str(x) for x in df_raw[col_origen].dropna().unique()]) if col_origen in df_raw.columns else []
+        origen_sel = st.sidebar.multiselect("Origen(es)", opciones_origen, default=[])
+
+        col_destino = 'DESTINO'
+        opciones_destino = sorted([str(x) for x in df_raw[col_destino].dropna().unique()]) if col_destino in df_raw.columns else []
+        destino_sel = st.sidebar.multiselect("Destino(s)", opciones_destino, default=[])
+
         # Aplicar filtros
         df = df_raw.copy()
         if clientes_sel and col_cliente in df.columns:
@@ -128,6 +136,10 @@ if archivo_subido is not None:
             df = df[df[col_transp].astype(str).isin(transp_sel)]
         if tipo_trans_sel and col_tipo_trans in df.columns:
             df = df[df[col_tipo_trans].astype(str).isin(tipo_trans_sel)]
+        if origen_sel and col_origen in df.columns:
+            df = df[df[col_origen].astype(str).isin(origen_sel)]
+        if destino_sel and col_destino in df.columns:
+            df = df[df[col_destino].astype(str).isin(destino_sel)]
 
         # SELECCIÓN DE PERIODO
         st.sidebar.markdown("---")
@@ -269,7 +281,7 @@ if archivo_subido is not None:
                     })
                 st.table(pd.DataFrame(filas))
 
-            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE
+            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (CON ORIGEN Y DESTINO)
             with tab2:
                 df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
                 df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
@@ -277,6 +289,8 @@ if archivo_subido is not None:
                 df_b_grouped = df_b_validos.groupby('ID_VIAJE_UNICO').agg({
                     'EMBARQUE': 'first',
                     'CLIENTE': 'first',
+                    'ORIGEN': 'first',
+                    'DESTINO': 'first',
                     'TRANSPORTISTA': 'first',
                     'TIPO DE TRANSPORTE': 'first',
                     'KG MOVIDOS': 'sum',
@@ -309,11 +323,11 @@ DATOS COMPARATIVOS ({modo_periodo.upper()} {per_a} vs {modo_periodo.upper()} {pe
 - Periodo Base ({modo_periodo} {per_a}): Viajes Reales: {viajes_a} | KG Movidos: {kg_a:,.0f} | Tarimas Totales: {tar_a:,.0f} | Costo Puro/KG: ${costo_kg_a:,.2f} | Costo Puro/Tarima: ${costo_tar_a:,.2f} | Tarifa Media/Viaje: ${media_viaje_a:,.2f} | Gasto Operación Total: ${tot_a:,.2f}
 - Periodo Actual ({modo_periodo} {per_b}): Viajes Reales: {viajes_b} | KG Movidos: {kg_b:,.0f} | Tarimas Totales: {tar_b:,.0f} | Costo Puro/KG: ${costo_kg_b:,.2f} | Costo Puro/Tarima: ${costo_tar_b:,.2f} | Tarifa Media/Viaje: ${media_viaje_b:,.2f} | Gasto Operación Total: ${tot_b:,.2f}
 - Variación del Gasto Total de la Operación: {var_tot:+.2f}%
-- Filtros Operativos -> Cliente: {clientes_sel if clientes_sel else 'Todos'} | Transportista: {transp_sel if transp_sel else 'Todos'} | Tipo de Transporte: {tipo_trans_sel if tipo_trans_sel else 'Todos'}
+- Filtros Operativos -> Cliente: {clientes_sel if clientes_sel else 'Todos'} | Transportista: {transp_sel if transp_sel else 'Todos'} | Tipo de Transporte: {tipo_trans_sel if tipo_trans_sel else 'Todos'} | Origen: {origen_sel if origen_sel else 'Todos'} | Destino: {destino_sel if destino_sel else 'Todos'}
 
 ESTRUCTURA DEL REPORTE SOLICITADA:
 1. 📌 Resumen Ejecutivo
-2. 🚨 Alertas Operativas (Desviación en Tarifa Base por Viaje, Costo por KG, Tarimas y Volumen de Carga)
+2. 🚨 Alertas Operativas (Desviación en Tarifa Base por Viaje, Costo por KG, Tarimas y Volumen de Carga, considerando rutas geográficas críticas)
 3. 💡 Recomendaciones para Negociación de Tarifas y Eficiencia en Costos Variables"""
 
                 st.code(prompt_texto, language="markdown")
