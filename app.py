@@ -20,15 +20,11 @@ archivo_subido = st.file_uploader(
     type=["xlsx", "csv"]
 )
 
-CONFIG_HOJAS = {
-    'ENERO': 430,
-    'FEBRERO': 407,
-    'MARZO': 369,
-    'ABRIL': 662,
-    'MAYO': 394,
-    'JUNIO': 398,
-    'JULIO': 387
-}
+# Lista estándar de meses para validar y filtrar las hojas del Excel
+NOMBRES_MESES = [
+    'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 
+    'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
+]
 
 @st.cache_data
 def procesar_archivo(file):
@@ -36,9 +32,11 @@ def procesar_archivo(file):
 
     if file.name.endswith('.xlsx'):
         excel_file = pd.ExcelFile(file)
-        for nombre_hoja, limite_fila in CONFIG_HOJAS.items():
+        # Solo considera las hojas que correspondan a los meses y que REALMENTE existan en el archivo
+        for nombre_hoja in NOMBRES_MESES:
             if nombre_hoja in excel_file.sheet_names:
-                df_temp = pd.read_excel(excel_file, sheet_name=nombre_hoja, nrows=limite_fila, header=0)
+                # Se eliminó la limitación de 'nrows', ahora lee la hoja completa
+                df_temp = pd.read_excel(excel_file, sheet_name=nombre_hoja, header=0)
                 if not df_temp.empty:
                     df_temp.columns = [str(h).strip() for h in df_temp.columns]
                     df_temp['MES_ORIGEN'] = nombre_hoja
@@ -108,7 +106,7 @@ if archivo_subido is not None:
         df_raw = procesar_archivo(archivo_subido)
 
     if not df_raw.empty:
-        st.success("✅ Base de datos cargada y consolidada mediante índices enteros correctamente.")
+        st.success("✅ Base de datos cargada y consolidada dinámicamente por meses válidos.")
 
         # BARRA LATERAL: FILTROS DE ANÁLISIS
         st.sidebar.header("🔍 Filtros Operativos")
@@ -151,7 +149,8 @@ if archivo_subido is not None:
             label_a, label_b = "Semana A (Base)", "Semana B (Actual)"
         else:
             col_periodo = 'MES FACTURA'
-            periodos = sorted([str(x) for x in df[col_periodo].dropna().unique()])
+            # Mantiene el orden cronológico natural de los meses cargados
+            periodos = [m for m in NOMBRES_MESES if m in df[col_periodo].dropna().unique()]
             label_a, label_b = "Mes A (Base)", "Mes B (Actual)"
 
         if len(periodos) > 0:
@@ -183,7 +182,7 @@ if archivo_subido is not None:
                 flete_puro_a = df_a['FLETE FACTURA'].sum() if 'FLETE FACTURA' in df_a.columns else 0
                 flete_puro_b = df_b['FLETE FACTURA'].sum() if 'FLETE FACTURA' in df_b.columns else 0
 
-                # Costo Medio por Viaje Basado exclusivamente en Flete Pactado (2 decimales)
+                # Costo Medio por Viaje Basado exclusivamente en Flete Pactado
                 media_viaje_a = (flete_puro_a / viajes_a) if viajes_a > 0 else 0
                 media_viaje_b = (flete_puro_b / viajes_b) if viajes_b > 0 else 0
 
@@ -194,7 +193,7 @@ if archivo_subido is not None:
                 tar_a = df_a['TARIMAS TOTALES POR VIAJE'].sum() if 'TARIMAS TOTALES POR VIAJE' in df_a.columns else 0
                 tar_b = df_b['TARIMAS TOTALES POR VIAJE'].sum() if 'TARIMAS TOTALES POR VIAJE' in df_b.columns else 0
 
-                # Indicadores Unitarios usando el Flete sin cargos adicionales
+                # Indicadores Unitarios usando el Flete sin cargos adicionales (2 decimales)
                 costo_kg_a = (flete_puro_a / kg_a) if kg_a > 0 else 0
                 costo_kg_b = (flete_puro_b / kg_b) if kg_b > 0 else 0
 
@@ -245,7 +244,6 @@ if archivo_subido is not None:
                 st.markdown("<br>", unsafe_allow_html=True)
                 m_col5, m_col6 = st.columns(2)
                 with m_col5:
-                    # MODIFICADO: Cambiado de :,.4f a :,.2f para forzar 2 decimales
                     render_kpi(
                         f"Costo por Kilogramo ({modo_periodo} {per_a} ➜ {per_b})",
                         f"${costo_kg_a:,.2f}", f"${costo_kg_b:,.2f}",
@@ -312,7 +310,6 @@ if archivo_subido is not None:
             with tab3:
                 var_tot = ((tot_b - tot_a) / tot_a * 100) if tot_a > 0 else 0
 
-                # MODIFICADO: También ajustado el string del prompt a 2 decimales (:,.2f)
                 prompt_texto = f"""Actúa como un Gerente Senior de Logística y Cadena de Suministro.
 Analiza la siguiente variación de fletes e imprevistos financieros y genera un reporte ejecutivo.
 
