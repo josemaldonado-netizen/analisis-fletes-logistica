@@ -22,8 +22,8 @@ archivo_subido = st.file_uploader(
 
 CONFIG_HOJAS = {
     'ENERO': 430,
-    'FEBRERO': 408,
-    'MARZO': 370,
+    'FEBRERO': 407,
+    'MARZO': 369,
     'ABRIL': 662,
     'MAYO': 394,
     'JUNIO': 398,
@@ -61,7 +61,7 @@ def procesar_archivo(file):
     if 'MES FACTURA' not in df_out.columns:
         df_out['MES FACTURA'] = df_out['MES_ORIGEN']
 
-    # Limpieza numérica de montos
+    # Limpieza numérica de montos y cantidades
     cols_a_limpiar = [
         'IMPORTE FACTURADO SIN IVA', 'KG MOVIDOS', 'FLETE FACTURA',
         'MANIOBRAS', 'REPARTOS', 'DEMORAS Y ESTADIAS', 'OTROS',
@@ -73,29 +73,24 @@ def procesar_archivo(file):
             df_out[c] = df_out[c].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip()
             df_out[c] = pd.to_numeric(df_out[c], errors='coerce').fillna(0)
 
-    # REESTRUCTURACIÓN DE LA LÓGICA DE VIAJES
-    id_viajes = []
-    es_cuenta_viaje = []
-
-    for idx, row in df_out.iterrows():
-        emb_val = str(row.get('EMBARQUE', '')).strip().upper()
-        flete_val = row.get('TOTAL FLETE', 0)
-
-        # Caso A: Si tiene folio explícito diferente a NA/vacío (Consolidado)
-        if emb_val not in ['NA', 'NAN', '', 'NONE', '0']:
-            id_viajes.append(f"FOLIO_{emb_val}")
-            es_cuenta_viaje.append(True)
-        # Caso B: Si es NA pero SÍ cobró flete (Cada fila es 1 viaje real independiente)
-        elif flete_val > 0:
-            id_viajes.append(f"VIAJE_ROW_{idx}")
-            es_cuenta_viaje.append(True)
-        # Caso C: Si es NA y flete $0 (Remisión secundaria/complementaria)
-        else:
-            id_viajes.append(f"COMPLEMENTO_ROW_{idx}")
-            es_cuenta_viaje.append(False)
-
-    df_out['ID_VIAJE_UNICO'] = id_viajes
-    df_out['ES_CUENTA_VIAJE'] = es_cuenta_viaje
+    # NUEVA LÓGICA DE PROCESAMIENTO BASADA EN TU COLUMNA "INDICE VIAJES"
+    if 'INDICE VIAJES' in df_out.columns:
+        # Convertimos todo a string, limpiamos espacios y pasamos a mayúsculas para homologar los NA
+        idx_limpio = df_out['INDICE VIAJES'].astype(str).str.strip().str.upper()
+        
+        # Filtramos: el renglón es válido si no está vacío, ni es NA, NAN, NONE o 0
+        es_valido = ~idx_limpio.isin(['NA', 'NAN', '', 'NONE', '0'])
+        
+        # Guardamos la marca de validez
+        df_out['ES_CUENTA_VIAJE'] = es_valido
+        
+        # Forzamos los valores válidos a números enteros limpios. Lo que no sea válido será NaN.
+        df_out['ID_VIAJE_UNICO'] = pd.to_numeric(df_out['INDICE VIAJES'], errors='coerce')
+    else:
+        # En caso de que no exista la columna en el archivo por error, se genera un respaldo
+        st.warning("⚠️ No se encontró la columna 'INDICE VIAJES' en el archivo cargado.")
+        df_out['ID_VIAJE_UNICO'] = df_out.index
+        df_out['ES_CUENTA_VIAJE'] = df_out['TOTAL FLETE'] > 0
 
     return df_out
 
@@ -122,7 +117,7 @@ if archivo_subido is not None:
         df_raw = procesar_archivo(archivo_subido)
 
     if not df_raw.empty:
-        st.success("✅ Base de datos cargada y consolidada por viajes correctamente.")
+        st.success("✅ Base de datos cargada y consolidada mediante índices enteros correctamente.")
 
         # BARRA LATERAL: FILTROS DE ANÁLISIS
         st.sidebar.header("🔍 Filtros Operativos")
@@ -182,10 +177,11 @@ if archivo_subido is not None:
             with tab1:
                 st.subheader(f"📊 Comparativa Real: {modo_periodo} {per_a} vs {modo_periodo} {per_b}")
 
-                # CÁLCULO REESTRUCTURADO DE VIAJES
+                # FILTRADO DE FILAS CON ÍNDICES VÁLIDOS (IGNORANDO LOS NA)
                 df_a_principales = df_a[df_a['ES_CUENTA_VIAJE'] == True]
                 df_b_principales = df_b[df_b['ES_CUENTA_VIAJE'] == True]
 
+                # CONTEO DISTINCT / UNIQUE BASADO EN TU COLUMNA DE ÍNDICES ENTEROS
                 viajes_a = df_a_principales['ID_VIAJE_UNICO'].nunique()
                 viajes_b = df_b_principales['ID_VIAJE_UNICO'].nunique()
 
@@ -195,21 +191,32 @@ if archivo_subido is not None:
                 media_viaje_a = (tot_a / viajes_a) if viajes_a > 0 else 0
                 media_viaje_b = (tot_b / viajes_b) if viajes_b > 0 else 0
 
-                # SUMATORIAS TOTALES (INCLUYEN KILOS/TARIMAS DE REMISIONES COMPLEMENTARIAS $0)
+                # SUMATORIAS TOTALES DE VOLUMEN
                 kg_a = df_a['KG MOVIDOS'].sum() if 'KG MOVIDOS' in df_a.columns else 0
                 kg_b = df_b['KG MOVIDOS'].sum() if 'KG MOVIDOS' in df_b.columns else 0
 
                 tar_a = df_a['TARIMAS TOTALES POR VIAJE'].sum() if 'TARIMAS TOTALES POR VIAJE' in df_a.columns else 0
                 tar_b = df_b['TARIMAS TOTALES POR VIAJE'].sum() if 'TARIMAS TOTALES POR VIAJE' in df_b.columns else 0
 
+                # NUEVOS CÁLCULOS: COSTO POR KG Y COSTO POR TARIMA
+                costo_kg_a = (tot_a / kg_a) if kg_a > 0 else 0
+                costo_kg_b = (tot_b / kg_b) if kg_b > 0 else 0
+
+                costo_tar_a = (tot_a / tar_a) if tar_a > 0 else 0
+                costo_tar_b = (tot_b / tar_b) if tar_b > 0 else 0
+
+                # CÁLCULO DE VARIACIONES
                 var_viajes = viajes_b - viajes_a
                 var_costo = ((media_viaje_b - media_viaje_a) / media_viaje_a * 100) if media_viaje_a > 0 else 0
                 var_kg = ((kg_b - kg_a) / kg_a * 100) if kg_a > 0 else 0
                 var_tar = ((tar_b - tar_a) / tar_a * 100) if tar_a > 0 else 0
+                var_costo_kg = ((costo_kg_b - costo_kg_a) / costo_kg_a * 100) if costo_kg_a > 0 else 0
+                var_costo_tar = ((costo_tar_b - costo_tar_a) / costo_tar_a * 100) if costo_tar_a > 0 else 0
 
                 st.markdown("### 📐 Resumen de Indicadores Clave")
+                
+                # Primera fila de KPIs
                 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-
                 with m_col1:
                     render_kpi(
                         f"Total Viajes ({modo_periodo} {per_a} ➜ {per_b})",
@@ -217,7 +224,6 @@ if archivo_subido is not None:
                         f"{var_viajes:+} viajes",
                         is_positive_good=True, val_num=var_viajes
                     )
-
                 with m_col2:
                     render_kpi(
                         f"Costo Medio / Viaje ({modo_periodo} {per_a} ➜ {per_b})",
@@ -225,7 +231,6 @@ if archivo_subido is not None:
                         f"{var_costo:+.1f}%",
                         is_positive_good=False, val_num=var_costo
                     )
-
                 with m_col3:
                     render_kpi(
                         f"KG Movidos ({modo_periodo} {per_a} ➜ {per_b})",
@@ -233,13 +238,30 @@ if archivo_subido is not None:
                         f"{var_kg:+.1f}%",
                         is_positive_good=True, val_num=var_kg
                     )
-
                 with m_col4:
                     render_kpi(
                         f"Tarimas Totales ({modo_periodo} {per_a} ➜ {per_b})",
                         f"{tar_a:,.0f}", f"{tar_b:,.0f}",
                         f"{var_tar:+.1f}%",
                         is_positive_good=True, val_num=var_tar
+                    )
+
+                # Segunda fila de KPIs (Nuevas métricas solicitadas)
+                st.markdown("<br>", unsafe_allow_html=True)
+                m_col5, m_col6 = st.columns(2)
+                with m_col5:
+                    render_kpi(
+                        f"Costo por Kilogramo ({modo_periodo} {per_a} ➜ {per_b})",
+                        f"${costo_kg_a:,.4f}", f"${costo_kg_b:,.4f}",
+                        f"{var_costo_kg:+.1f}%",
+                        is_positive_good=False, val_num=var_costo_kg
+                    )
+                with m_col6:
+                    render_kpi(
+                        f"Costo por Tarima ({modo_periodo} {per_a} ➜ {per_b})",
+                        f"${costo_tar_a:,.2f}", f"${costo_tar_b:,.2f}",
+                        f"{var_costo_tar:+.1f}%",
+                        is_positive_good=False, val_num=var_costo_tar
                     )
 
                 st.markdown("---")
@@ -262,9 +284,11 @@ if archivo_subido is not None:
                     })
                 st.table(pd.DataFrame(filas))
 
-            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE
+            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (EXCLUYE LOS NA)
             with tab2:
-                df_b_grouped = df_b.groupby('ID_VIAJE_UNICO').agg({
+                df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True]
+                
+                df_b_grouped = df_b_validos.groupby('ID_VIAJE_UNICO').agg({
                     'EMBARQUE': 'first',
                     'CLIENTE': 'first',
                     'TRANSPORTISTA': 'first',
@@ -282,10 +306,10 @@ if archivo_subido is not None:
                     viajes_altos['Diferencia vs Media Base'] = viajes_altos['TOTAL FLETE'] - media_ref
                     viajes_altos = viajes_altos.sort_values(by='TOTAL FLETE', ascending=False)
 
-                    st.warning(f"🚨 Auditoría: **{len(viajes_altos)} embarques/viajes consolidados** en el {modo_periodo} {per_b} superan el costo promedio por viaje del {modo_periodo} {per_a} (${media_ref:,.2f})")
+                    st.warning(f"🚨 Auditoría: **{len(viajes_altos)} embarques/viajes únicos** en el {modo_periodo} {per_b} superan el costo promedio por viaje del {modo_periodo} {per_a} (${media_ref:,.2f})")
                     st.dataframe(viajes_altos, use_container_width=True)
                 else:
-                    st.success(f"✅ No se encontraron embarques consolidados en el {modo_periodo} {per_b} que superen la media del {modo_periodo} {per_a}.")
+                    st.success(f"✅ No se encontraron embarques en el {modo_periodo} {per_b} que superen la media del {modo_periodo} {per_a}.")
 
             # TAB 3: PROMPT GENERATOR
             with tab3:
@@ -295,14 +319,14 @@ if archivo_subido is not None:
 Analiza la siguiente variación de fletes e imprevistos financieros y genera un reporte ejecutivo.
 
 DATOS COMPARATIVOS ({modo_periodo.upper()} {per_a} vs {modo_periodo.upper()} {per_b}):
-- Periodo Base ({modo_periodo} {per_a}): Viajes Reales: {viajes_a} | KG Movidos: {kg_a:,.0f} | Tarimas: {tar_a:,.0f} | Gasto Total: ${tot_a:,.2f} | Costo Medio/Viaje: ${media_viaje_a:,.2f}
-- Periodo Actual ({modo_periodo} {per_b}): Viajes Reales: {viajes_b} | KG Movidos: {kg_b:,.0f} | Tarimas: {tar_b:,.0f} | Gasto Total: ${tot_b:,.2f} | Costo Medio/Viaje: ${media_viaje_b:,.2f}
+- Periodo Base ({modo_periodo} {per_a}): Viajes Reales: {viajes_a} | KG Movidos: {kg_a:,.0f} | Tarimas: {tar_a:,.0f} | Costo/KG: ${costo_kg_a:,.4f} | Costo/Tarima: ${costo_tar_a:,.2f} | Gasto Total: ${tot_a:,.2f} | Costo Medio/Viaje: ${media_viaje_a:,.2f}
+- Periodo Actual ({modo_periodo} {per_b}): Viajes Reales: {viajes_b} | KG Movidos: {kg_b:,.0f} | Tarimas: {tar_b:,.0f} | Costo/KG: ${costo_kg_b:,.4f} | Costo/Tarima: ${costo_tar_b:,.2f} | Gasto Total: ${tot_b:,.2f} | Costo Medio/Viaje: ${media_viaje_b:,.2f}
 - Variación del Gasto Total: {var_tot:+.2f}%
 - Filtros Operativos -> Embarque: {embarque_sel} | Cliente: {clientes_sel if clientes_sel else 'Todos'} | Transportista: {transp_sel if transp_sel else 'Todos'}
 
 ESTRUCTURA DEL REPORTE SOLICITADA:
 1. 📌 Resumen Ejecutivo
-2. 🚨 Alertas Operativas (Desviación en Costo por Viaje y Volumen)
+2. 🚨 Alertas Operativas (Desviación en Costo por Viaje, Costo por KG, Tarimas y Volumen)
 3. 💡 Recomendaciones para Negociación y Eficiencia"""
 
                 st.code(prompt_texto, language="markdown")
