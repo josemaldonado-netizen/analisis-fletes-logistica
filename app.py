@@ -73,21 +73,17 @@ def procesar_archivo(file):
             df_out[c] = df_out[c].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip()
             df_out[c] = pd.to_numeric(df_out[c], errors='coerce').fillna(0)
 
-    # NUEVA LÓGICA DE PROCESAMIENTO BASADA EN TU COLUMNA "INDICE VIAJES"
+    # CORRECCIÓN DE INDICE: Excluir textos, encabezados accidentales, ceros y celdas vacías
     if 'INDICE VIAJES' in df_out.columns:
-        # Convertimos todo a string, limpiamos espacios y pasamos a mayúsculas para homologar los NA
-        idx_limpio = df_out['INDICE VIAJES'].astype(str).str.strip().str.upper()
+        # Forzar conversión a número; los textos/letras/NA se vuelven NaN automáticamente
+        indices_numericos = pd.to_numeric(df_out['INDICE VIAJES'], errors='coerce')
         
-        # Filtramos: el renglón es válido si no está vacío, ni es NA, NAN, NONE o 0
-        es_valido = ~idx_limpio.isin(['NA', 'NAN', '', 'NONE', '0'])
+        # Guardamos en el DataFrame final el ID como flotante/nan de momento
+        df_out['ID_VIAJE_UNICO'] = indices_numericos
         
-        # Guardamos la marca de validez
-        df_out['ES_CUENTA_VIAJE'] = es_valido
-        
-        # Forzamos los valores válidos a números enteros limpios. Lo que no sea válido será NaN.
-        df_out['ID_VIAJE_UNICO'] = pd.to_numeric(df_out['INDICE VIAJES'], errors='coerce')
+        # Un renglón es válido para contar viaje SOLO si es un número válido y mayor a 0
+        df_out['ES_CUENTA_VIAJE'] = indices_numericos.notna() & (indices_numericos > 0)
     else:
-        # En caso de que no exista la columna en el archivo por error, se genera un respaldo
         st.warning("⚠️ No se encontró la columna 'INDICE VIAJES' en el archivo cargado.")
         df_out['ID_VIAJE_UNICO'] = df_out.index
         df_out['ES_CUENTA_VIAJE'] = df_out['TOTAL FLETE'] > 0
@@ -177,13 +173,13 @@ if archivo_subido is not None:
             with tab1:
                 st.subheader(f"📊 Comparativa Real: {modo_periodo} {per_a} vs {modo_periodo} {per_b}")
 
-                # FILTRADO DE FILAS CON ÍNDICES VÁLIDOS (IGNORANDO LOS NA)
+                # SOLUCIÓN DEL CONTEO: Filtrar explícitamente renglones marcados como válidos
                 df_a_principales = df_a[df_a['ES_CUENTA_VIAJE'] == True]
                 df_b_principales = df_b[df_b['ES_CUENTA_VIAJE'] == True]
 
-                # CONTEO DISTINCT / UNIQUE BASADO EN TU COLUMNA DE ÍNDICES ENTEROS
-                viajes_a = df_a_principales['ID_VIAJE_UNICO'].nunique()
-                viajes_b = df_b_principales['ID_VIAJE_UNICO'].nunique()
+                # CORRECCIÓN DISTINCT / UNIQUE: Hacemos dropna() antes del conteo para eliminar cualquier celda nula o vacía
+                viajes_a = df_a_principales['ID_VIAJE_UNICO'].dropna().nunique()
+                viajes_b = df_b_principales['ID_VIAJE_UNICO'].dropna().nunique()
 
                 tot_a = df_a['TOTAL FLETE'].sum() if 'TOTAL FLETE' in df_a.columns else 0
                 tot_b = df_b['TOTAL FLETE'].sum() if 'TOTAL FLETE' in df_b.columns else 0
@@ -219,7 +215,7 @@ if archivo_subido is not None:
                 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
                 with m_col1:
                     render_kpi(
-                        f"Total Viajes ({modo_periodo} {per_a} ➜ {per_b})",
+                        f"Total Viajes Reales ({modo_periodo} {per_a} ➜ {per_b})",
                         f"{viajes_a}", f"{viajes_b}",
                         f"{var_viajes:+} viajes",
                         is_positive_good=True, val_num=var_viajes
@@ -246,7 +242,7 @@ if archivo_subido is not None:
                         is_positive_good=True, val_num=var_tar
                     )
 
-                # Segunda fila de KPIs (Nuevas métricas solicitadas)
+                # Segunda fila de KPIs
                 st.markdown("<br>", unsafe_allow_html=True)
                 m_col5, m_col6 = st.columns(2)
                 with m_col5:
@@ -284,9 +280,12 @@ if archivo_subido is not None:
                     })
                 st.table(pd.DataFrame(filas))
 
-            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (EXCLUYE LOS NA)
+            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (EXCLUYE TOTALMENTE LOS ELEMENTOS VACÍOS O CON LETRAS)
             with tab2:
-                df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True]
+                df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
+                
+                # Para asegurar visualización limpia, convertimos el ID a entero antes de agrupar
+                df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
                 
                 df_b_grouped = df_b_validos.groupby('ID_VIAJE_UNICO').agg({
                     'EMBARQUE': 'first',
