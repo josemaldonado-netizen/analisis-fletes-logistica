@@ -131,7 +131,7 @@ if archivo_subido is not None:
         opciones_destino = sorted([str(x) for x in df_raw[col_destino].dropna().unique()]) if col_destino in df_raw.columns else []
         destino_sel = st.sidebar.multiselect("Destino", opciones_destino, default=[])
 
-        # Aplicar filtros operativos múltiples
+        # Aplicar filtros operativos múltiples al dataframe general
         df = df_raw.copy()
         if clientes_sel and col_cliente in df.columns:
             df = df[df[col_cliente].astype(str).isin(clientes_sel)]
@@ -263,7 +263,6 @@ if archivo_subido is not None:
 
                 conceptos = ['FLETE FACTURA', 'MANIOBRAS', 'REPARTOS', 'DEMORAS Y ESTADIAS', 'OTROS', 'TOTAL FLETE']
                 filas = []
-                datos_grafico = []
 
                 for conc in conceptos:
                     m_a = df_a[conc].sum() if conc in df_a.columns else 0
@@ -278,23 +277,50 @@ if archivo_subido is not None:
                         'Diferencia ($)': f"${dif:,.2f}",
                         'Variación (%)': f"{pct:+.1f}%"
                     })
-                    
-                    # Estructura limpia de datos para graficar de forma nativa
-                    datos_grafico.append({
-                        'Concepto': conc,
-                        f'{modo_periodo} {per_a}': m_a,
-                        f'{modo_periodo} {per_b}': m_b
-                    })
 
                 st.table(pd.DataFrame(filas))
 
-                # --- NUEVA SECCIÓN: GRÁFICO DE TENDENCIA COMPARATIVO ---
-                st.markdown("#### 📈 Gráfico Comparativo de Gastos Acumulados")
-                df_grafico = pd.DataFrame(datos_grafico).set_index('Concepto')
+                # --- NUEVA SECCIÓN: GRÁFICO DE LÍNEAS DE TENDENCIA CON FILTRO EXCLUSIVO ---
+                st.markdown("---")
+                st.markdown("### 📈 Tendencia Histórica e Interactiva de Datos")
                 
-                # Desplegar un gráfico de barras múltiples agrupado por Concepto
-                st.bar_chart(df_grafico, use_container_width=True)
-                # ------------------------------------------------------
+                # Mapa de nombres amigables a las columnas reales de la BD
+                dicc_metricas = {
+                    "Tarimas": "TARIMAS TOTALES POR VIAJE",
+                    "Kgs": "KG MOVIDOS",
+                    "Flete factura": "FLETE FACTURA",
+                    "Maniobra": "MANIOBRAS",
+                    "Repartos": "REPARTOS",
+                    "Demoras y estadías": "DEMORAS Y ESTADIAS",
+                    "Otros": "OTROS",
+                    "Total Flete": "TOTAL FLETE"
+                }
+                
+                # Selector exclusivo para manipular el gráfico de líneas
+                metrica_seleccionada = st.selectbox(
+                    "🔍 Selecciona la métrica para analizar en el gráfico de líneas:",
+                    options=list(dicc_metricas.keys()),
+                    index=2 # Flete factura por defecto
+                )
+                
+                col_bd_grafico = dicc_metricas[metrica_seleccionada]
+                
+                # Agrupación y generación de la línea temporal basada en el tipo de filtro activo (Mes o Semana)
+                if modo_periodo == "Mes":
+                    df_linea = df.groupby('MES FACTURA')[col_bd_grafico].sum().reset_index()
+                    # Reordenar los meses cronológicamente para evitar desorden visual
+                    df_linea['MES FACTURA'] = pd.Categorical(df_linea['MES FACTURA'], categories=NOMBRES_MESES, ordered=True)
+                    df_linea = df_linea.sort_values('MES FACTURA').set_index('MES FACTURA')
+                else:
+                    df_linea = df.groupby('SEMANA_ANALISIS')[col_bd_grafico].sum().reset_index()
+                    df_linea = df_linea.dropna().sort_values('SEMANA_ANALISIS').set_index('SEMANA_ANALISIS')
+                
+                # Renombrar columna para que en el gráfico se vea el nombre limpio seleccionado
+                df_linea = df_linea.rename(columns={col_bd_grafico: metrica_seleccionada})
+                
+                # Desplegar el gráfico de líneas dinámico
+                st.line_chart(df_linea, use_container_width=True)
+                # --------------------------------------------------------------------------
 
             # TAB 2: AUDITORÍA AGRUPADA POR VIAJE
             with tab2:
