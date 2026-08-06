@@ -75,13 +75,8 @@ def procesar_archivo(file):
 
     # CORRECCIÓN DE INDICE: Excluir textos, encabezados accidentales, ceros y celdas vacías
     if 'INDICE VIAJES' in df_out.columns:
-        # Forzar conversión a número; los textos/letras/NA se vuelven NaN automáticamente
         indices_numericos = pd.to_numeric(df_out['INDICE VIAJES'], errors='coerce')
-        
-        # Guardamos en el DataFrame final el ID como flotante/nan de momento
         df_out['ID_VIAJE_UNICO'] = indices_numericos
-        
-        # Un renglón es válido para contar viaje SOLO si es un número válido y mayor a 0
         df_out['ES_CUENTA_VIAJE'] = indices_numericos.notna() & (indices_numericos > 0)
     else:
         st.warning("⚠️ No se encontró la columna 'INDICE VIAJES' en el archivo cargado.")
@@ -173,35 +168,40 @@ if archivo_subido is not None:
             with tab1:
                 st.subheader(f"📊 Comparativa Real: {modo_periodo} {per_a} vs {modo_periodo} {per_b}")
 
-                # SOLUCIÓN DEL CONTEO: Filtrar explícitamente renglones marcados como válidos
+                # Conteo Correcto de Viajes Únicos
                 df_a_principales = df_a[df_a['ES_CUENTA_VIAJE'] == True]
                 df_b_principales = df_b[df_b['ES_CUENTA_VIAJE'] == True]
 
-                # CORRECCIÓN DISTINCT / UNIQUE: Hacemos dropna() antes del conteo para eliminar cualquier celda nula o vacía
                 viajes_a = df_a_principales['ID_VIAJE_UNICO'].dropna().nunique()
                 viajes_b = df_b_principales['ID_VIAJE_UNICO'].dropna().nunique()
 
+                # Gasto de la Operación Total (Mantiene visibilidad macro con adicionales)
                 tot_a = df_a['TOTAL FLETE'].sum() if 'TOTAL FLETE' in df_a.columns else 0
                 tot_b = df_b['TOTAL FLETE'].sum() if 'TOTAL FLETE' in df_b.columns else 0
 
-                media_viaje_a = (tot_a / viajes_a) if viajes_a > 0 else 0
-                media_viaje_b = (tot_b / viajes_b) if viajes_b > 0 else 0
+                # CORRECCIÓN: Flete Puro para análisis de costos unitarios logísticos
+                flete_puro_a = df_a['FLETE FACTURA'].sum() if 'FLETE FACTURA' in df_a.columns else 0
+                flete_puro_b = df_b['FLETE FACTURA'].sum() if 'FLETE FACTURA' in df_b.columns else 0
 
-                # SUMATORIAS TOTALES DE VOLUMEN
+                # CORRECCIÓN: Costo Medio por Viaje Basado exclusivamente en Flete Pactado
+                media_viaje_a = (flete_puro_a / viajes_a) if viajes_a > 0 else 0
+                media_viaje_b = (flete_puro_b / viajes_b) if viajes_b > 0 else 0
+
+                # Sumatorias de Volumen
                 kg_a = df_a['KG MOVIDOS'].sum() if 'KG MOVIDOS' in df_a.columns else 0
                 kg_b = df_b['KG MOVIDOS'].sum() if 'KG MOVIDOS' in df_b.columns else 0
 
                 tar_a = df_a['TARIMAS TOTALES POR VIAJE'].sum() if 'TARIMAS TOTALES POR VIAJE' in df_a.columns else 0
                 tar_b = df_b['TARIMAS TOTALES POR VIAJE'].sum() if 'TARIMAS TOTALES POR VIAJE' in df_b.columns else 0
 
-                # NUEVOS CÁLCULOS: COSTO POR KG Y COSTO POR TARIMA
-                costo_kg_a = (tot_a / kg_a) if kg_a > 0 else 0
-                costo_kg_b = (tot_b / kg_b) if kg_b > 0 else 0
+                # CORRECCIÓN: Indicadores Unitarios usando el Flete sin cargos de Maniobras/Imprevistos
+                costo_kg_a = (flete_puro_a / kg_a) if kg_a > 0 else 0
+                costo_kg_b = (flete_puro_b / kg_b) if kg_b > 0 else 0
 
-                costo_tar_a = (tot_a / tar_a) if tar_a > 0 else 0
-                costo_tar_b = (tot_b / tar_b) if tar_b > 0 else 0
+                costo_tar_a = (flete_puro_a / tar_a) if tar_a > 0 else 0
+                costo_tar_b = (flete_puro_b / tar_b) if tar_b > 0 else 0
 
-                # CÁLCULO DE VARIACIONES
+                # Variaciones
                 var_viajes = viajes_b - viajes_a
                 var_costo = ((media_viaje_b - media_viaje_a) / media_viaje_a * 100) if media_viaje_a > 0 else 0
                 var_kg = ((kg_b - kg_a) / kg_a * 100) if kg_a > 0 else 0
@@ -209,9 +209,9 @@ if archivo_subido is not None:
                 var_costo_kg = ((costo_kg_b - costo_kg_a) / costo_kg_a * 100) if costo_kg_a > 0 else 0
                 var_costo_tar = ((costo_tar_b - costo_tar_a) / costo_tar_a * 100) if costo_tar_a > 0 else 0
 
-                st.markdown("### 📐 Resumen de Indicadores Clave")
+                st.markdown("### 📐 Resumen de Indicadores Clave (Basados en Flete Base)")
                 
-                # Primera fila de KPIs
+                # KPIs principales
                 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
                 with m_col1:
                     render_kpi(
@@ -222,7 +222,7 @@ if archivo_subido is not None:
                     )
                 with m_col2:
                     render_kpi(
-                        f"Costo Medio / Viaje ({modo_periodo} {per_a} ➜ {per_b})",
+                        f"Tarifa Media / Viaje ({modo_periodo} {per_a} ➜ {per_b})",
                         f"${media_viaje_a:,.2f}", f"${media_viaje_b:,.2f}",
                         f"{var_costo:+.1f}%",
                         is_positive_good=False, val_num=var_costo
@@ -242,7 +242,6 @@ if archivo_subido is not None:
                         is_positive_good=True, val_num=var_tar
                     )
 
-                # Segunda fila de KPIs
                 st.markdown("<br>", unsafe_allow_html=True)
                 m_col5, m_col6 = st.columns(2)
                 with m_col5:
@@ -280,11 +279,9 @@ if archivo_subido is not None:
                     })
                 st.table(pd.DataFrame(filas))
 
-            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (EXCLUYE TOTALMENTE LOS ELEMENTOS VACÍOS O CON LETRAS)
+            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE
             with tab2:
                 df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
-                
-                # Para asegurar visualización limpia, convertimos el ID a entero antes de agrupar
                 df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
                 
                 df_b_grouped = df_b_validos.groupby('ID_VIAJE_UNICO').agg({
@@ -298,19 +295,20 @@ if archivo_subido is not None:
                     'TOTAL FLETE': 'sum'
                 }).reset_index()
 
+                # La auditoría evalúa las desviaciones de flete pactado contra la media base
                 media_ref = media_viaje_a
-                viajes_altos = df_b_grouped[df_b_grouped['TOTAL FLETE'] > media_ref].copy()
+                viajes_altos = df_b_grouped[df_b_grouped['FLETE FACTURA'] > media_ref].copy()
 
                 if not viajes_altos.empty:
-                    viajes_altos['Diferencia vs Media Base'] = viajes_altos['TOTAL FLETE'] - media_ref
-                    viajes_altos = viajes_altos.sort_values(by='TOTAL FLETE', ascending=False)
+                    viajes_altos['Diferencia vs Media Base'] = viajes_altos['FLETE FACTURA'] - media_ref
+                    viajes_altos = viajes_altos.sort_values(by='FLETE FACTURA', ascending=False)
 
-                    st.warning(f"🚨 Auditoría: **{len(viajes_altos)} embarques/viajes únicos** en el {modo_periodo} {per_b} superan el costo promedio por viaje del {modo_periodo} {per_a} (${media_ref:,.2f})")
+                    st.warning(f"🚨 Auditoría: **{len(viajes_altos)} embarques/viajes únicos** en el {modo_periodo} {per_b} superan la tarifa flete base promedio del {modo_periodo} {per_a} (${media_ref:,.2f})")
                     st.dataframe(viajes_altos, use_container_width=True)
                 else:
-                    st.success(f"✅ No se encontraron embarques en el {modo_periodo} {per_b} que superen la media del {modo_periodo} {per_a}.")
+                    st.success(f"✅ No se encontraron fletes en el {modo_periodo} {per_b} que superen la media del {modo_periodo} {per_a}.")
 
-            # TAB 3: PROMPT GENERATOR
+            # TAB 3: PROMPT GENERATOR (Actualizado con los datos limpios)
             with tab3:
                 var_tot = ((tot_b - tot_a) / tot_a * 100) if tot_a > 0 else 0
 
@@ -318,15 +316,15 @@ if archivo_subido is not None:
 Analiza la siguiente variación de fletes e imprevistos financieros y genera un reporte ejecutivo.
 
 DATOS COMPARATIVOS ({modo_periodo.upper()} {per_a} vs {modo_periodo.upper()} {per_b}):
-- Periodo Base ({modo_periodo} {per_a}): Viajes Reales: {viajes_a} | KG Movidos: {kg_a:,.0f} | Tarimas: {tar_a:,.0f} | Costo/KG: ${costo_kg_a:,.4f} | Costo/Tarima: ${costo_tar_a:,.2f} | Gasto Total: ${tot_a:,.2f} | Costo Medio/Viaje: ${media_viaje_a:,.2f}
-- Periodo Actual ({modo_periodo} {per_b}): Viajes Reales: {viajes_b} | KG Movidos: {kg_b:,.0f} | Tarimas: {tar_b:,.0f} | Costo/KG: ${costo_kg_b:,.4f} | Costo/Tarima: ${costo_tar_b:,.2f} | Gasto Total: ${tot_b:,.2f} | Costo Medio/Viaje: ${media_viaje_b:,.2f}
-- Variación del Gasto Total: {var_tot:+.2f}%
+- Periodo Base ({modo_periodo} {per_a}): Viajes Reales: {viajes_a} | KG Movidos: {kg_a:,.0f} | Tarimas: {tar_a:,.0f} | Costo Puro/KG: ${costo_kg_a:,.4f} | Costo Puro/Tarima: ${costo_tar_a:,.2f} | Tarifa Media/Viaje: ${media_viaje_a:,.2f} | Gasto Operación Total: ${tot_a:,.2f}
+- Periodo Actual ({modo_periodo} {per_b}): Viajes Reales: {viajes_b} | KG Movidos: {kg_b:,.0f} | Tarimas: {tar_b:,.0f} | Costo Puro/KG: ${costo_kg_b:,.4f} | Costo Puro/Tarima: ${costo_tar_b:,.2f} | Tarifa Media/Viaje: ${media_viaje_b:,.2f} | Gasto Operación Total: ${tot_b:,.2f}
+- Variación del Gasto Total de la Operación: {var_tot:+.2f}%
 - Filtros Operativos -> Embarque: {embarque_sel} | Cliente: {clientes_sel if clientes_sel else 'Todos'} | Transportista: {transp_sel if transp_sel else 'Todos'}
 
 ESTRUCTURA DEL REPORTE SOLICITADA:
 1. 📌 Resumen Ejecutivo
-2. 🚨 Alertas Operativas (Desviación en Costo por Viaje, Costo por KG, Tarimas y Volumen)
-3. 💡 Recomendaciones para Negociación y Eficiencia"""
+2. 🚨 Alertas Operativas (Desviación en Tarifa Base por Viaje, Costo por KG, Tarimas y Volumen de Carga)
+3. 💡 Recomendaciones para Negociación de Tarifas y Eficiencia en Costos Variables"""
 
                 st.code(prompt_texto, language="markdown")
         else:
