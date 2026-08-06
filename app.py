@@ -102,7 +102,7 @@ if archivo_subido is not None:
         df_raw = procesar_archivo(archivo_subido)
 
     if not df_raw.empty:
-        st.success("✅ Base de datos cargada y consolidada dinámicamente por meses válidos.")
+        st.success("✅ Base de datos cargada y consolidada dinámicamente.")
 
         # BARRA LATERAL: FILTROS DE ANÁLISIS
         st.sidebar.header("🔍 Filtros Operativos")
@@ -123,8 +123,8 @@ if archivo_subido is not None:
         opciones_embarque = sorted([str(x) for x in df_raw[col_embarque].dropna().unique()]) if col_embarque in df_raw.columns else []
         embarque_sel = st.sidebar.multiselect("Tipo de Embarque", opciones_embarque, default=[])
 
-        # CORRECCIÓN DE NOMBRE DE COLUMNA AQUÍ
-        col_origen = 'ORIGEN'
+        # CORRECCIÓN DE COLUMNA AP: "ORIGEN DE VIAJE"
+        col_origen = 'ORIGEN DE VIAJE'
         opciones_origen = sorted([str(x) for x in df_raw[col_origen].dropna().unique()]) if col_origen in df_raw.columns else []
         origen_sel = st.sidebar.multiselect("Origen", opciones_origen, default=[])
 
@@ -281,51 +281,16 @@ if archivo_subido is not None:
 
                 st.table(pd.DataFrame(filas))
 
-                # --- SECCIÓN: FILTRO PROPIO Y GRÁFICO DE LÍNEAS ---
-                st.markdown("---")
-                st.markdown("### 📈 Análisis de Tendencia Avanzado")
-                
-                dicc_metricas = {
-                    "KG Movidos": kg_a, "Tarimas": tar_a,
-                    "Flete Factura ($)": flete_puro_a, "Maniobras ($)": df_a['MANIOBRAS'].sum() if 'MANIOBRAS' in df_a.columns else 0,
-                    "Repartos ($)": df_a['REPARTOS'].sum() if 'REPARTOS' in df_a.columns else 0,
-                    "Demoras y Estadías ($)": df_a['DEMORAS Y ESTADIAS'].sum() if 'DEMORAS Y ESTADIAS' in df_a.columns else 0,
-                    "Otros ($)": df_a['OTROS'].sum() if 'OTROS' in df_a.columns else 0,
-                    "Total Flete ($)": tot_a, "Costo por KG ($)": costo_kg_a, "Costo por Tarima ($)": costo_tar_a
-                }
-                
-                dicc_metricas_b = {
-                    "KG Movidos": kg_b, "Tarimas": tar_b,
-                    "Flete Factura ($)": flete_puro_b, "Maniobras ($)": df_b['MANIOBRAS'].sum() if 'MANIOBRAS' in df_b.columns else 0,
-                    "Repartos ($)": df_b['REPARTOS'].sum() if 'REPARTOS' in df_b.columns else 0,
-                    "Demoras y Estadías ($)": df_b['DEMORAS Y ESTADIAS'].sum() if 'DEMORAS Y ESTADIAS' in df_b.columns else 0,
-                    "Otros ($)": df_b['OTROS'].sum() if 'OTROS' in df_b.columns else 0,
-                    "Total Flete ($)": tot_b, "Costo por KG ($)": costo_kg_b, "Costo por Tarima ($)": costo_tar_b
-                }
-
-                metrica_seleccionada = st.selectbox(
-                    "🔍 Selecciona la métrica específica que deseas graficar:",
-                    list(dicc_metricas.keys())
-                )
-
-                datos_tendencia = {
-                    'Periodo de Análisis': [f"{modo_periodo} {per_a}", f"{modo_periodo} {per_b}"],
-                    metrica_seleccionada: [dicc_metricas[metrica_seleccionada], dicc_metricas_b[metrica_seleccionada]]
-                }
-                df_tendencia = pd.DataFrame(datos_tendencia).set_index('Periodo de Análisis')
-
-                st.line_chart(df_tendencia, use_container_width=True)
-
-            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (CORREGIDA COLUMNA 'ORIGEN')
+            # TAB 2: AUDITORÍA DE ANOMALÍAS (Mapeado exacto de 'ORIGEN DE VIAJE')
             with tab2:
                 df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
                 df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
                 
-                # Agrupación usando la columna correcta 'ORIGEN'
+                # Agrupación usando 'ORIGEN DE VIAJE'
                 df_b_grouped = df_b_validos.groupby('ID_VIAJE_UNICO').agg({
                     'CLIENTE': 'first',
                     'TRANSPORTISTA': 'first',
-                    'ORIGEN': 'first',  # <-- Ajustado a la columna correcta
+                    'ORIGEN DE VIAJE': 'first',  # Mapeado a la columna AP exacta
                     'DESTINO DE EMBARQUE': 'first',
                     'TARIMAS TOTALES POR VIAJE': 'sum',
                     'TIPO DE TRANSPORTE': 'first',
@@ -339,7 +304,7 @@ if archivo_subido is not None:
                 }).reset_index()
 
                 df_b_grouped = df_b_grouped.rename(columns={
-                    'ORIGEN': 'Origen',
+                    'ORIGEN DE VIAJE': 'Origen',
                     'DESTINO DE EMBARQUE': 'Destino',
                     'TARIMAS TOTALES POR VIAJE': 'Tarimas',
                     'TIPO DE TRANSPORTE': 'Unidad'
@@ -359,7 +324,7 @@ if archivo_subido is not None:
                         if col in df_visualizacion.columns:
                             df_visualizacion[col] = df_visualizacion[col].apply(lambda x: f"${x:,.2f}")
 
-                    st.warning(f"🚨 Auditoría: **{len(viajes_altos)} viajes únicos** en el {modo_periodo} {per_b} superan la tarifa flete base promedio del {modo_periodo} {per_a} (${media_ref:,.2f})")
+                    st.warning(f"🚨 Auditoría: **{len(viajes_altos)} viajes uniques** en el {modo_periodo} {per_b} superan la tarifa flete base promedio del {modo_periodo} {per_a} (${media_ref:,.2f})")
                     st.dataframe(df_visualizacion, use_container_width=True, hide_index=True)
                 else:
                     st.success(f"✅ No se encontraron fletes en el {modo_periodo} {per_b} que superen la media del {modo_periodo} {per_a}.")
