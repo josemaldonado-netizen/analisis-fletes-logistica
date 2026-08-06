@@ -263,6 +263,8 @@ if archivo_subido is not None:
 
                 conceptos = ['FLETE FACTURA', 'MANIOBRAS', 'REPARTOS', 'DEMORAS Y ESTADIAS', 'OTROS', 'TOTAL FLETE']
                 filas = []
+                datos_grafico = []
+
                 for conc in conceptos:
                     m_a = df_a[conc].sum() if conc in df_a.columns else 0
                     m_b = df_b[conc].sum() if conc in df_b.columns else 0
@@ -276,9 +278,25 @@ if archivo_subido is not None:
                         'Diferencia ($)': f"${dif:,.2f}",
                         'Variación (%)': f"{pct:+.1f}%"
                     })
+                    
+                    # Estructura limpia de datos para graficar de forma nativa
+                    datos_grafico.append({
+                        'Concepto': conc,
+                        f'{modo_periodo} {per_a}': m_a,
+                        f'{modo_periodo} {per_b}': m_b
+                    })
+
                 st.table(pd.DataFrame(filas))
 
-            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE (CON FORMATOS MONETARIOS Y MÁS GASTOS)
+                # --- NUEVA SECCIÓN: GRÁFICO DE TENDENCIA COMPARATIVO ---
+                st.markdown("#### 📈 Gráfico Comparativo de Gastos Acumulados")
+                df_grafico = pd.DataFrame(datos_grafico).set_index('Concepto')
+                
+                # Desplegar un gráfico de barras múltiples agrupado por Concepto
+                st.bar_chart(df_grafico, use_container_width=True)
+                # ------------------------------------------------------
+
+            # TAB 2: AUDITORÍA AGRUPADA POR VIAJE
             with tab2:
                 df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
                 df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
@@ -313,7 +331,6 @@ if archivo_subido is not None:
                     viajes_altos['Diferencia vs Media Base'] = viajes_altos['FLETE FACTURA'] - media_ref
                     viajes_altos = viajes_altos.sort_values(by='FLETE FACTURA', ascending=False)
 
-                    # Formatear columnas numéricas monetarias a strings legibles ($#,##0.00)
                     cols_dinero = ['FLETE FACTURA', 'MANIOBRAS', 'REPARTOS', 'DEMORAS Y ESTADIAS', 'OTROS', 'TOTAL FLETE', 'Diferencia vs Media Base']
                     df_visualizacion = viajes_altos.copy()
                     
