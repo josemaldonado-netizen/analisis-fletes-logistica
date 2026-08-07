@@ -14,6 +14,30 @@ import plotly.express as px
 st.set_page_config(page_title="LogiSense AI", layout="wide")
 st.title("🚚 LogiSense AI — Analítica Logística Avanzada")
 
+st.markdown(
+    """
+    <style>
+    .footer {
+        position: fixed;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: transparent;
+        color: #a0a0a0;
+        text-align: right;
+        padding-right: 20px;
+        padding-bottom: 10px;
+        font-size: 12px;
+        font-style: italic;
+        z-index: 100;
+        pointer-events: none;
+    }
+    </style>
+    <div class="footer">Desarrollado por José Daniel Maldonado Flores</div>
+    """,
+    unsafe_allow_html=True
+)
+
 # 1. Componente para subir el archivo (Excel o CSV)
 archivo_subido = st.file_uploader(
     "📁 Carga tu archivo de datos (Excel .xlsx o CSV)",
