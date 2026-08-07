@@ -49,6 +49,22 @@ def procesar_archivo(file):
 
     df_out = pd.concat(lista_dfs, ignore_index=True)
 
+    # LIMPIEZA RIGUROSA DE INDICE VIAJES (Filtra de raíz filas con NA, N/A, vacías o sin número válido)
+    if 'INDICE VIAJES' in df_out.columns:
+        idx_limpio = df_out['INDICE VIAJES'].astype(str).str.strip().str.upper()
+        # Reemplazar valores no válidos por NaN
+        idx_limpio = idx_limpio.replace(['NA', 'N/A', 'NONE', 'NAN', 'UNDEFINED', 'NULL', ''], np.nan)
+        indices_numericos = pd.to_numeric(idx_limpio, errors='coerce')
+        
+        # Filtrar el dataframe completo descartando las filas vacías/invalidas en INDICE VIAJES
+        df_out = df_out[indices_numericos.notna() & (indices_numericos > 0)].copy()
+        df_out['ID_VIAJE_UNICO'] = indices_numericos[indices_numericos.notna() & (indices_numericos > 0)].astype(int)
+        df_out['ES_CUENTA_VIAJE'] = True
+    else:
+        st.warning("⚠️ No se encontró la columna 'INDICE VIAJES' en el archivo cargado.")
+        df_out['ID_VIAJE_UNICO'] = df_out.index
+        df_out['ES_CUENTA_VIAJE'] = True
+
     # Normalización de Semana y Mes
     col_sem = 'SEMANA CALENDARIO FACTURA' if 'SEMANA CALENDARIO FACTURA' in df_out.columns else 'SEMANA CALENDARIO PEDIDO'
     if col_sem in df_out.columns:
@@ -68,19 +84,6 @@ def procesar_archivo(file):
         if c in df_out.columns:
             df_out[c] = df_out[c].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip()
             df_out[c] = pd.to_numeric(df_out[c], errors='coerce').fillna(0)
-
-    # LIMPIEZA DE INDICE VIAJES (Ignora explícitamente "NA", "N/A", etc.)
-    if 'INDICE VIAJES' in df_out.columns:
-        idx_limpio = df_out['INDICE VIAJES'].astype(str).str.strip().str.upper()
-        idx_limpio = idx_limpio.replace(['NA', 'N/A', 'NONE', 'NAN', ''], np.nan)
-        
-        indices_numericos = pd.to_numeric(idx_limpio, errors='coerce')
-        df_out['ID_VIAJE_UNICO'] = indices_numericos
-        df_out['ES_CUENTA_VIAJE'] = indices_numericos.notna() & (indices_numericos > 0)
-    else:
-        st.warning("⚠️ No se encontró la columna 'INDICE VIAJES' en el archivo cargado.")
-        df_out['ID_VIAJE_UNICO'] = df_out.index
-        df_out['ES_CUENTA_VIAJE'] = df_out['TOTAL FLETE'] > 0
 
     return df_out
 
@@ -106,9 +109,9 @@ if archivo_subido is not None:
         df_raw = procesar_archivo(archivo_subido)
 
     if not df_raw.empty:
-        st.success("✅ Base de datos cargada y consolidada dinámicamente.")
+        st.success("✅ Base de datos cargada y filtrada dinámicamente (se omitieron filas sin 'INDICE VIAJES').")
 
-        # BARRA LATERAL: FILTROS DE ANÁLISIS
+        # BARRA LATERAL: FILTROS DE ANÁLISIS (Se generan únicamente con los viajes válidos)
         st.sidebar.header("🔍 Filtros Operativos")
 
         col_cliente = 'CLIENTE'
@@ -219,7 +222,7 @@ if archivo_subido is not None:
 
                 st.markdown("### 📐 Resumen de Indicadores Clave")
                 
-                # Primera fila de KPIs (con Facturación)
+                # Primera fila de KPIs
                 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
                 with m_col1:
                     render_kpi(
@@ -354,8 +357,7 @@ if archivo_subido is not None:
 
             # TAB 2: AUDITORÍA DE ANOMALÍAS
             with tab2:
-                df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
-                df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
+                df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True]
                 
                 df_b_grouped = df_b_validos.groupby('ID_VIAJE_UNICO').agg({
                     'CLIENTE': 'first',
