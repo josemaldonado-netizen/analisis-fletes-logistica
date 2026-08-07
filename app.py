@@ -19,14 +19,11 @@ st.markdown(
     <style>
     .footer {
         position: fixed;
-        left: 0;
-        bottom: 0;
-        width: 100%;
+        right: 150px;
+        bottom: 12px;
         background-color: transparent;
         color: #a0a0a0;
         text-align: right;
-        padding-right: 20px;
-        padding-bottom: 10px;
         font-size: 12px;
         font-style: italic;
         z-index: 100;
