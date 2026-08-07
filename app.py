@@ -35,6 +35,28 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+
+# Ocultar menú principal, footer nativo y botón 'Manage app'
+st.markdown(
+    """
+    <style>
+    /* Ocultar el menú de 3 puntos en la esquina superior derecha */
+    #MainMenu {visibility: hidden;}
+    
+    /* Ocultar el footer por defecto de Streamlit ("Made with Streamlit") */
+    footer {visibility: hidden;}
+    
+    /* Ocultar el encabezado superior (incluye botón de deploy/manage) */
+    header {visibility: hidden;}
+    
+    /* Ocultar específicamente el contenedor flotante de Manage app */
+    div[data-testid="stStatusWidget"] {visibility: hidden;}
+    .viewerBadge_container__1tB24 {display: none !important;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # 1. Componente para subir el archivo (Excel o CSV)
 archivo_subido = st.file_uploader(
     "📁 Carga tu archivo de datos (Excel .xlsx o CSV)",
