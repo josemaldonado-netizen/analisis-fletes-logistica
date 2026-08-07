@@ -9,6 +9,7 @@ Original file is located at
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
 
 st.set_page_config(page_title="LogiSense AI", layout="wide")
 st.title("🚚 LogiSense AI — Analítica Logística Avanzada")
@@ -68,9 +69,13 @@ def procesar_archivo(file):
             df_out[c] = df_out[c].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip()
             df_out[c] = pd.to_numeric(df_out[c], errors='coerce').fillna(0)
 
-    # CORRECCIÓN DE INDICE
+    # LIMPIEZA DE INDICE VIAJES (Elimina "NA", "N/A", textos o nulos)
     if 'INDICE VIAJES' in df_out.columns:
-        indices_numericos = pd.to_numeric(df_out['INDICE VIAJES'], errors='coerce')
+        # Reemplazar cadenas de 'NA'/'N/A' explícitas por NaN antes de parsear
+        idx_limpio = df_out['INDICE VIAJES'].astype(str).str.strip().str.upper()
+        idx_limpio = idx_limpio.replace(['NA', 'N/A', 'NONE', 'NAN', ''], np.nan)
+        
+        indices_numericos = pd.to_numeric(idx_limpio, errors='coerce')
         df_out['ID_VIAJE_UNICO'] = indices_numericos
         df_out['ES_CUENTA_VIAJE'] = indices_numericos.notna() & (indices_numericos > 0)
     else:
@@ -123,7 +128,6 @@ if archivo_subido is not None:
         opciones_embarque = sorted([str(x) for x in df_raw[col_embarque].dropna().unique()]) if col_embarque in df_raw.columns else []
         embarque_sel = st.sidebar.multiselect("Tipo de Embarque", opciones_embarque, default=[])
 
-        # CORRECCIÓN DE COLUMNA AP: "ORIGEN DE VIAJE"
         col_origen = 'ORIGEN DE VIAJE'
         opciones_origen = sorted([str(x) for x in df_raw[col_origen].dropna().unique()]) if col_origen in df_raw.columns else []
         origen_sel = st.sidebar.multiselect("Origen", opciones_origen, default=[])
@@ -171,7 +175,7 @@ if archivo_subido is not None:
             df_b = df[df[col_periodo] == per_b]
 
             # TABS DE VISUALIZACIÓN
-            tab1, tab2, tab3 = st.tabs(["📊 Comparativo Financiero y Medias", "🚨 Auditoría de Anomalías", "📝 Prompt para IA Executive"])
+            tab1, tab2, tab3 = st.tabs(["📊 Comparativo Financiero y Gráficos", "🚨 Auditoría de Anomalías", "📝 Prompt para IA Executive"])
 
             with tab1:
                 st.subheader(f"📊 Comparativa Real: {modo_periodo} {per_a} vs {modo_periodo} {per_b}")
@@ -210,7 +214,7 @@ if archivo_subido is not None:
                 var_costo_kg = ((costo_kg_b - costo_kg_a) / costo_kg_a * 100) if costo_kg_a > 0 else 0
                 var_costo_tar = ((costo_tar_b - costo_tar_a) / costo_tar_a * 100) if costo_tar_a > 0 else 0
 
-                st.markdown("### 📐 Resumen de Indicadores Clave (Basados en Flete Base)")
+                st.markdown("### 📐 Resumen de Indicadores Clave")
                 
                 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
                 with m_col1:
@@ -259,6 +263,83 @@ if archivo_subido is not None:
                         is_positive_good=False, val_num=var_costo_tar
                     )
 
+                # SECCIÓN DE GRÁFICO DE LÍNEAS TENDENCIAL
+                st.markdown("---")
+                st.markdown("### 📈 Tendencia Histórica y Comportamiento de Métricas")
+
+                dict_metricas = {
+                    "Flete Factura": "FLETE FACTURA",
+                    "Maniobras": "MANIOBRAS",
+                    "Repartos": "REPARTOS",
+                    "Demoras y Estadías": "DEMORAS Y ESTADIAS",
+                    "Otros Gastos": "OTROS",
+                    "Total Flete": "TOTAL FLETE",
+                    "KG Movidos": "KG MOVIDOS",
+                    "Tarimas Totales": "TARIMAS TOTALES POR VIAJE",
+                    "Costo por KG": "COSTO_KG",
+                    "Costo por Tarima": "COSTO_TARIMA"
+                }
+
+                col_met1, col_met2 = st.columns([2, 1])
+                with col_met1:
+                    metricas_seleccionadas = st.multiselect(
+                        "Selecciona las métricas a visualizar en la gráfica:",
+                        options=list(dict_metricas.keys()),
+                        default=["Flete Factura", "Total Flete"]
+                    )
+
+                # Agrupación temporal según el modo seleccionado (Semana o Mes)
+                df_trend = df.copy()
+                
+                if modo_periodo == "Mes":
+                    df_trend['PERIODO_ORDEN'] = pd.Categorical(df_trend['MES FACTURA'], categories=NOMBRES_MESES, ordered=True)
+                    df_grouped = df_trend.groupby('PERIODO_ORDEN', observed=True).agg({
+                        'FLETE FACTURA': 'sum',
+                        'MANIOBRAS': 'sum',
+                        'REPARTOS': 'sum',
+                        'DEMORAS Y ESTADIAS': 'sum',
+                        'OTROS': 'sum',
+                        'TOTAL FLETE': 'sum',
+                        'KG MOVIDOS': 'sum',
+                        'TARIMAS TOTALES POR VIAJE': 'sum'
+                    }).reset_index().rename(columns={'PERIODO_ORDEN': 'Periodo'})
+                else:
+                    df_grouped = df_trend.groupby('SEMANA_ANALISIS').agg({
+                        'FLETE FACTURA': 'sum',
+                        'MANIOBRAS': 'sum',
+                        'REPARTOS': 'sum',
+                        'DEMORAS Y ESTADIAS': 'sum',
+                        'OTROS': 'sum',
+                        'TOTAL FLETE': 'sum',
+                        'KG MOVIDOS': 'sum',
+                        'TARIMAS TOTALES POR VIAJE': 'sum'
+                    }).reset_index().rename(columns={'SEMANA_ANALISIS': 'Periodo'})
+
+                # Cálculo dinámico de ratios derivados por periodo
+                df_grouped['COSTO_KG'] = np.where(df_grouped['KG MOVIDOS'] > 0, df_grouped['FLETE FACTURA'] / df_grouped['KG MOVIDOS'], 0)
+                df_grouped['COSTO_TARIMA'] = np.where(df_grouped['TARIMAS TOTALES POR VIAJE'] > 0, df_grouped['FLETE FACTURA'] / df_grouped['TARIMAS TOTALES POR VIAJE'], 0)
+
+                if metricas_seleccionadas and not df_grouped.empty:
+                    cols_y = [dict_metricas[m] for m in metricas_seleccionadas]
+                    
+                    fig_lineas = px.line(
+                        df_grouped,
+                        x='Periodo',
+                        y=cols_y,
+                        markers=True,
+                        title=f"Evolución por {modo_periodo}",
+                        labels={'value': 'Monto / Cantidad', 'variable': 'Métrica'}
+                    )
+                    
+                    fig_lineas.update_layout(
+                        hovermode="x unified",
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    
+                    st.plotly_chart(fig_lineas, use_container_width=True)
+                else:
+                    st.info("Selecciona al menos una métrica para mostrar el gráfico de líneas.")
+
                 st.markdown("---")
                 st.markdown("### 💵 Desglose de Gastos Acumulados")
 
@@ -281,16 +362,15 @@ if archivo_subido is not None:
 
                 st.table(pd.DataFrame(filas))
 
-            # TAB 2: AUDITORÍA DE ANOMALÍAS (Mapeado exacto de 'ORIGEN DE VIAJE')
+            # TAB 2: AUDITORÍA DE ANOMALÍAS
             with tab2:
                 df_b_validos = df_b[df_b['ES_CUENTA_VIAJE'] == True].dropna(subset=['ID_VIAJE_UNICO'])
                 df_b_validos['ID_VIAJE_UNICO'] = df_b_validos['ID_VIAJE_UNICO'].astype(int)
                 
-                # Agrupación usando 'ORIGEN DE VIAJE'
                 df_b_grouped = df_b_validos.groupby('ID_VIAJE_UNICO').agg({
                     'CLIENTE': 'first',
                     'TRANSPORTISTA': 'first',
-                    'ORIGEN DE VIAJE': 'first',  # Mapeado a la columna AP exacta
+                    'ORIGEN DE VIAJE': 'first',
                     'DESTINO DE EMBARQUE': 'first',
                     'TARIMAS TOTALES POR VIAJE': 'sum',
                     'TIPO DE TRANSPORTE': 'first',
@@ -324,7 +404,7 @@ if archivo_subido is not None:
                         if col in df_visualizacion.columns:
                             df_visualizacion[col] = df_visualizacion[col].apply(lambda x: f"${x:,.2f}")
 
-                    st.warning(f"🚨 Auditoría: **{len(viajes_altos)} viajes uniques** en el {modo_periodo} {per_b} superan la tarifa flete base promedio del {modo_periodo} {per_a} (${media_ref:,.2f})")
+                    st.warning(f"🚨 Auditoría: **{len(viajes_altos)} viajes únicos** en el {modo_periodo} {per_b} superan la tarifa flete base promedio del {modo_periodo} {per_a} (${media_ref:,.2f})")
                     st.dataframe(df_visualizacion, use_container_width=True, hide_index=True)
                 else:
                     st.success(f"✅ No se encontraron fletes en el {modo_periodo} {per_b} que superen la media del {modo_periodo} {per_a}.")
