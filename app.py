@@ -69,9 +69,8 @@ def procesar_archivo(file):
             df_out[c] = df_out[c].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip()
             df_out[c] = pd.to_numeric(df_out[c], errors='coerce').fillna(0)
 
-    # LIMPIEZA DE INDICE VIAJES (Elimina "NA", "N/A", textos o nulos)
+    # LIMPIEZA DE INDICE VIAJES (Ignora explícitamente "NA", "N/A", etc.)
     if 'INDICE VIAJES' in df_out.columns:
-        # Reemplazar cadenas de 'NA'/'N/A' explícitas por NaN antes de parsear
         idx_limpio = df_out['INDICE VIAJES'].astype(str).str.strip().str.upper()
         idx_limpio = idx_limpio.replace(['NA', 'N/A', 'NONE', 'NAN', ''], np.nan)
         
@@ -263,9 +262,9 @@ if archivo_subido is not None:
                         is_positive_good=False, val_num=var_costo_tar
                     )
 
-                # SECCIÓN DE GRÁFICO DE LÍNEAS TENDENCIAL
+                # GRÁFICO DE LÍNEAS
                 st.markdown("---")
-                st.markdown("### 📈 Tendencia Histórica y Comportamiento de Métricas")
+                st.markdown("### 📈 Tendencia Histórica de Métricas")
 
                 dict_metricas = {
                     "Flete Factura": "FLETE FACTURA",
@@ -280,65 +279,39 @@ if archivo_subido is not None:
                     "Costo por Tarima": "COSTO_TARIMA"
                 }
 
-                col_met1, col_met2 = st.columns([2, 1])
-                with col_met1:
-                    metricas_seleccionadas = st.multiselect(
-                        "Selecciona las métricas a visualizar en la gráfica:",
-                        options=list(dict_metricas.keys()),
-                        default=["Flete Factura", "Total Flete"]
-                    )
+                metricas_seleccionadas = st.multiselect(
+                    "Selecciona las métricas para graficar:",
+                    options=list(dict_metricas.keys()),
+                    default=["Flete Factura", "Total Flete"]
+                )
 
-                # Agrupación temporal según el modo seleccionado (Semana o Mes)
                 df_trend = df.copy()
-                
                 if modo_periodo == "Mes":
                     df_trend['PERIODO_ORDEN'] = pd.Categorical(df_trend['MES FACTURA'], categories=NOMBRES_MESES, ordered=True)
                     df_grouped = df_trend.groupby('PERIODO_ORDEN', observed=True).agg({
-                        'FLETE FACTURA': 'sum',
-                        'MANIOBRAS': 'sum',
-                        'REPARTOS': 'sum',
-                        'DEMORAS Y ESTADIAS': 'sum',
-                        'OTROS': 'sum',
-                        'TOTAL FLETE': 'sum',
-                        'KG MOVIDOS': 'sum',
-                        'TARIMAS TOTALES POR VIAJE': 'sum'
+                        'FLETE FACTURA': 'sum', 'MANIOBRAS': 'sum', 'REPARTOS': 'sum',
+                        'DEMORAS Y ESTADIAS': 'sum', 'OTROS': 'sum', 'TOTAL FLETE': 'sum',
+                        'KG MOVIDOS': 'sum', 'TARIMAS TOTALES POR VIAJE': 'sum'
                     }).reset_index().rename(columns={'PERIODO_ORDEN': 'Periodo'})
                 else:
                     df_grouped = df_trend.groupby('SEMANA_ANALISIS').agg({
-                        'FLETE FACTURA': 'sum',
-                        'MANIOBRAS': 'sum',
-                        'REPARTOS': 'sum',
-                        'DEMORAS Y ESTADIAS': 'sum',
-                        'OTROS': 'sum',
-                        'TOTAL FLETE': 'sum',
-                        'KG MOVIDOS': 'sum',
-                        'TARIMAS TOTALES POR VIAJE': 'sum'
+                        'FLETE FACTURA': 'sum', 'MANIOBRAS': 'sum', 'REPARTOS': 'sum',
+                        'DEMORAS Y ESTADIAS': 'sum', 'OTROS': 'sum', 'TOTAL FLETE': 'sum',
+                        'KG MOVIDOS': 'sum', 'TARIMAS TOTALES POR VIAJE': 'sum'
                     }).reset_index().rename(columns={'SEMANA_ANALISIS': 'Periodo'})
 
-                # Cálculo dinámico de ratios derivados por periodo
                 df_grouped['COSTO_KG'] = np.where(df_grouped['KG MOVIDOS'] > 0, df_grouped['FLETE FACTURA'] / df_grouped['KG MOVIDOS'], 0)
                 df_grouped['COSTO_TARIMA'] = np.where(df_grouped['TARIMAS TOTALES POR VIAJE'] > 0, df_grouped['FLETE FACTURA'] / df_grouped['TARIMAS TOTALES POR VIAJE'], 0)
 
                 if metricas_seleccionadas and not df_grouped.empty:
                     cols_y = [dict_metricas[m] for m in metricas_seleccionadas]
-                    
                     fig_lineas = px.line(
-                        df_grouped,
-                        x='Periodo',
-                        y=cols_y,
-                        markers=True,
+                        df_grouped, x='Periodo', y=cols_y, markers=True,
                         title=f"Evolución por {modo_periodo}",
                         labels={'value': 'Monto / Cantidad', 'variable': 'Métrica'}
                     )
-                    
-                    fig_lineas.update_layout(
-                        hovermode="x unified",
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                    )
-                    
+                    fig_lineas.update_layout(hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                     st.plotly_chart(fig_lineas, use_container_width=True)
-                else:
-                    st.info("Selecciona al menos una métrica para mostrar el gráfico de líneas.")
 
                 st.markdown("---")
                 st.markdown("### 💵 Desglose de Gastos Acumulados")
