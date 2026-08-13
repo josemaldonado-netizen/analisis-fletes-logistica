@@ -718,14 +718,15 @@ with tab1:
     # --- Mezcla de envío ---
     st.markdown("---")
     st.markdown("### 🚚 Mezcla de envío")
-    if 'TIPO DE TRANSPORTE' in df.columns:
-        if 'ID_VIAJE_UNICO' in df.columns:
-            conteo_mezcla = df.drop_duplicates('ID_VIAJE_UNICO').groupby('TIPO DE TRANSPORTE')['ID_VIAJE_UNICO'].nunique()
+    df_mezcla_base = pd.concat([df_a, df_b]).loc[lambda d: ~d.index.duplicated()]
+    if 'TIPO DE TRANSPORTE' in df_mezcla_base.columns:
+        if 'ID_VIAJE_UNICO' in df_mezcla_base.columns:
+            conteo_mezcla = df_mezcla_base.drop_duplicates('ID_VIAJE_UNICO').groupby('TIPO DE TRANSPORTE')['ID_VIAJE_UNICO'].nunique()
         else:
-            conteo_mezcla = df['TIPO DE TRANSPORTE'].value_counts()
-        kg_mezcla = df.groupby('TIPO DE TRANSPORTE')['KG MOVIDOS'].sum() if 'KG MOVIDOS' in df.columns else pd.Series(dtype=float)
-        valor_mezcla = df.groupby('TIPO DE TRANSPORTE')['IMPORTE FACTURADO SIN IVA'].sum() if 'IMPORTE FACTURADO SIN IVA' in df.columns else pd.Series(dtype=float)
-        tarimas_mezcla = df.groupby('TIPO DE TRANSPORTE')['TARIMAS TOTALES POR VIAJE'].sum() if 'TARIMAS TOTALES POR VIAJE' in df.columns else pd.Series(dtype=float)
+            conteo_mezcla = df_mezcla_base['TIPO DE TRANSPORTE'].value_counts()
+        kg_mezcla = df_mezcla_base.groupby('TIPO DE TRANSPORTE')['KG MOVIDOS'].sum() if 'KG MOVIDOS' in df_mezcla_base.columns else pd.Series(dtype=float)
+        valor_mezcla = df_mezcla_base.groupby('TIPO DE TRANSPORTE')['IMPORTE FACTURADO SIN IVA'].sum() if 'IMPORTE FACTURADO SIN IVA' in df_mezcla_base.columns else pd.Series(dtype=float)
+        tarimas_mezcla = df_mezcla_base.groupby('TIPO DE TRANSPORTE')['TARIMAS TOTALES POR VIAJE'].sum() if 'TARIMAS TOTALES POR VIAJE' in df_mezcla_base.columns else pd.Series(dtype=float)
 
         tipos_mezcla = sorted(set(conteo_mezcla.index) | set(kg_mezcla.index) | set(valor_mezcla.index) | set(tarimas_mezcla.index))
         categorias_mezcla = ['Conteo', 'Kgs', 'Valor $', 'Tarimas']
