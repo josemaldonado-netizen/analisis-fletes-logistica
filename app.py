@@ -736,7 +736,7 @@ with tab1:
                 tarimas_mezcla.get(tipo, 0),
             ]
             fig_mezcla.add_trace(go.Bar(y=categorias_mezcla, x=valores_tipo, name=str(tipo), orientation='h'))
-        fig_mezcla.update_layout(title="Mezcla de envío", barmode='stack', barnorm='percent', height=340, margin=dict(t=50,b=20), legend=dict(orientation="h", y=1.08))
+        fig_mezcla.update_layout(title="Mezcla de envío", barmode='stack', height=340, margin=dict(t=50,b=20), legend=dict(orientation="h", y=1.08))
         st.plotly_chart(fig_mezcla, use_container_width=True)
 
 with tab2:
