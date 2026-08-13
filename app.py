@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import html as html_lib
 import io
 import json
@@ -31,6 +32,8 @@ st.markdown("""
     transition: all 0.2s;
 }
 .kpi-card:hover { border-color: #dadce0; box-shadow: 0 1px 6px rgba(32,33,36,.1);}
+h3 { border-left: 4px solid #1a73e8; padding-left: 10px; margin-top: 6px; }
+.stCaption, [data-testid="stCaptionContainer"] { font-style: italic; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -56,6 +59,13 @@ MESES_EQUIVALENTES = {
     'DECEMBER': 'DICIEMBRE', 'DEC': 'DICIEMBRE'
 }
 COLS_MONTOS = ['IMPORTE FACTURADO SIN IVA','KG MOVIDOS','FLETE FACTURA','MANIOBRAS','REPARTOS','DEMORAS Y ESTADIAS','OTROS','TOTAL FLETE','KM RECORRIDOS','TARIMAS TOTALES POR VIAJE']
+CAPACIDADES_IDEALES = {
+    'TRAILER': 22000,
+    'TORTON': 11000,
+    'RABON': 8000,
+    'CAMIONETA 3.5': 3500,
+    'CAMIONETA 1.5': 1500
+}
 
 # ---------- HELPERS ----------
 def _normalizar_mes(valor):
@@ -527,6 +537,28 @@ if df_a.empty or df_b.empty:
     st.warning(f"⚠️ Uno de los periodos no tiene datos: A={len(df_a)} registros, B={len(df_b)} registros.")
     # no stop, muestra lo que hay
 
+def _aplicar_filtro_periodo(dframe: pd.DataFrame, cual: str) -> pd.DataFrame:
+    """Aplica el mismo Periodo A/B seleccionado en el sidebar, pero SIN los
+    Filtros Operativos (para gráficos que solo deben filtrarse por periodo)."""
+    if dframe is None or dframe.empty:
+        return dframe.iloc[0:0] if dframe is not None else pd.DataFrame()
+    if modo_periodo == "Semana":
+        col, valor = 'SEMANA_ANALISIS', (per_a if cual == 'A' else per_b)
+        return dframe[dframe[col] == valor] if col in dframe.columns else dframe.iloc[0:0]
+    elif modo_periodo == "Mes":
+        col, valor = 'MES FACTURA', (per_a if cual == 'A' else per_b)
+        return dframe[dframe[col] == valor] if col in dframe.columns else dframe.iloc[0:0]
+    else:
+        ini, fin = (ini_a, fin_a) if cual == 'A' else (ini_b, fin_b)
+        if 'FECHA_FACTURA_DT' not in dframe.columns:
+            return dframe.iloc[0:0]
+        return dframe[(dframe['FECHA_FACTURA_DT'] >= ini) & (dframe['FECHA_FACTURA_DT'] <= fin)]
+
+# Base "solo Periodos de Comparación" (ignora Filtros Operativos del sidebar)
+df_raw_periodos = pd.concat([
+    _aplicar_filtro_periodo(df_raw, 'A'), _aplicar_filtro_periodo(df_raw, 'B')
+]).loc[lambda d: ~d.index.duplicated()]
+
 # ---------- CÁLCULOS KPI ----------
 def _suma(col, dframe): 
     return dframe[col].sum(skipna=True) if col in dframe.columns else 0.0
@@ -579,7 +611,12 @@ var_mediana = _var_pct(mediana_viaje_b, mediana_viaje_a)
 var_ventas_vs_flete = _var_pct(ventas_vs_flete_b, ventas_vs_flete_a)
 
 # ---------- TABS ----------
-tab1, tab2, tab3 = st.tabs(["📊 Comparativo Financiero y Gráficos","🚨 Auditoría de Anomalías","📝 Prompt para IA Executive"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Comparativo Financiero y Gráficos",
+    "📦 Datos Generales",
+    "🚨 Auditoría de Anomalías",
+    "📝 Prompt para IA Executive"
+])
 
 with tab1:
     st.subheader(f"📊 Comparativa Real: {modo_periodo} {per_a} vs {modo_periodo} {per_b}")
@@ -746,7 +783,249 @@ with tab1:
         fig_mezcla.update_xaxes(showticklabels=False, title=None)
         st.plotly_chart(fig_mezcla, use_container_width=True)
 
+    # --- Por tipo de unidad ---
+    st.markdown("---")
+    st.markdown("### 🚛 Por tipo de unidad")
+    st.caption("Gasto de flete y % de ocupación media (peso) — unidades agrupadas por viaje/consolidado de eficiencia. Filtrable por Filtros Operativos y Periodos de Comparación.")
+    if 'TIPO DE TRANSPORTE' in df_mezcla_base.columns:
+        flete_tu = df_mezcla_base.groupby('TIPO DE TRANSPORTE')['FLETE FACTURA'].sum()
+        if 'ID_GRUPO_EFICIENCIA' in df_mezcla_base.columns and 'TIPO_UNIDAD_EFICIENCIA' in df_mezcla_base.columns:
+            df_ocup_tu = df_mezcla_base.groupby('ID_GRUPO_EFICIENCIA').agg(
+                **{'TIPO_UNIDAD_EFICIENCIA': ('TIPO_UNIDAD_EFICIENCIA', 'first'), 'KG MOVIDOS': ('KG MOVIDOS', 'sum')}
+            ).reset_index()
+            df_ocup_tu['Capacidad ideal (kg)'] = df_ocup_tu['TIPO_UNIDAD_EFICIENCIA'].astype(str).str.strip().str.upper().map(CAPACIDADES_IDEALES)
+            df_ocup_tu['Ocupación (%)'] = np.where(
+                df_ocup_tu['Capacidad ideal (kg)'].notna() & (df_ocup_tu['Capacidad ideal (kg)'] > 0),
+                df_ocup_tu['KG MOVIDOS'] / df_ocup_tu['Capacidad ideal (kg)'] * 100, np.nan
+            )
+            ocup_media_tu = df_ocup_tu.dropna(subset=['Ocupación (%)']).groupby('TIPO_UNIDAD_EFICIENCIA')['Ocupación (%)'].mean()
+        else:
+            ocup_media_tu = pd.Series(dtype=float)
+        tipos_tu = sorted(set(flete_tu.index) | set(ocup_media_tu.index))
+        if tipos_tu:
+            fig_tu = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_tu.add_trace(go.Bar(
+                x=tipos_tu, y=[flete_tu.get(t, 0) / 1_000_000 for t in tipos_tu],
+                name='Flete Factura (millones $)', marker_color='#1a73e8',
+                text=[f"${flete_tu.get(t, 0):,.0f}" for t in tipos_tu], textposition='outside'
+            ), secondary_y=False)
+            fig_tu.add_trace(go.Scatter(
+                x=tipos_tu, y=[ocup_media_tu.get(t) for t in tipos_tu],
+                name='% Ocupación media (peso)', mode='lines+markers',
+                line=dict(color='#ea4335', width=3), marker=dict(size=9)
+            ), secondary_y=True)
+            fig_tu.update_yaxes(title_text='Flete Factura (millones $)', dtick=2, rangemode='tozero', secondary_y=False)
+            fig_tu.update_yaxes(title_text='% Ocupación media (peso)', secondary_y=True)
+            fig_tu.update_layout(title="Por tipo de unidad — Gasto de flete y % de ocupación media (peso)", xaxis_title='Tipo de Transporte', height=380, margin=dict(t=60, b=20), legend=dict(orientation='h', y=1.12))
+            st.plotly_chart(fig_tu, use_container_width=True)
+        else:
+            st.info("No hay datos suficientes de Tipo de Transporte / Capacidad ideal para este gráfico.")
+    else:
+        st.info("No se encontró la columna TIPO DE TRANSPORTE.")
+
+    # --- Reparto por clasificación TR (pie) ---
+    st.markdown("---")
+    st.markdown("### 🥧 Reparto por clasificación TR")
+    st.caption("Participación del gasto de flete — agrupado por INDICE VIAJES (evita conteo duplicado/triple). Filtrable solo por Periodos de Comparación.")
+    if 'TIPO DE EMBARQUE' in df_raw_periodos.columns:
+        viaje_tr = df_raw_periodos.groupby('ID_VIAJE_UNICO').agg(
+            **{'TIPO DE EMBARQUE': ('TIPO DE EMBARQUE', 'first'), 'FLETE FACTURA': ('FLETE FACTURA', 'sum')}
+        ).reset_index()
+        viaje_tr['Clasificación TR'] = viaje_tr['TIPO DE EMBARQUE'].astype(str).str.strip().str.upper().replace({'': 'SIN CLASIFICAR', 'NAN': 'SIN CLASIFICAR'})
+        pie_tr = viaje_tr.groupby('Clasificación TR').agg(
+            Flete=('FLETE FACTURA', 'sum'), Conteo=('ID_VIAJE_UNICO', 'nunique')
+        ).reset_index()
+        if not pie_tr.empty:
+            fig_pie_tr = px.pie(pie_tr, values='Flete', names='Clasificación TR', hole=0.35, title="Reparto por clasificación TR — Participación del gasto de flete")
+            fig_pie_tr.update_traces(
+                customdata=pie_tr[['Conteo']].values,
+                texttemplate='%{label}<br>$%{value:,.0f}<br>%{customdata[0]:,.0f} viajes',
+                hovertemplate='%{label}<br>Flete: $%{value:,.2f}<br>Viajes: %{customdata[0]:,.0f}<extra></extra>'
+            )
+            st.plotly_chart(fig_pie_tr, use_container_width=True)
+        else:
+            st.info("No hay datos de TIPO DE EMBARQUE en los periodos seleccionados.")
+    else:
+        st.info("No se encontró la columna TIPO DE EMBARQUE.")
+
+    # --- Top 10 clientes ---
+    st.markdown("---")
+    st.markdown("### 🏆 Top 10 clientes por Flete Factura")
+    st.caption("Filtrable solo por Periodos de Comparación (Periodo A + Periodo B).")
+    if 'CLIENTE' in df_raw_periodos.columns:
+        top_clientes = df_raw_periodos.groupby('CLIENTE')['FLETE FACTURA'].sum().nlargest(10).sort_values()
+        if not top_clientes.empty:
+            fig_top_cli = go.Figure(go.Bar(
+                x=top_clientes.values, y=top_clientes.index, orientation='h', marker_color='#1a73e8',
+                text=[f"${v:,.0f}" for v in top_clientes.values], textposition='outside'
+            ))
+            fig_top_cli.update_layout(title="Top 10 Clientes — Flete Factura", xaxis_title='Flete Factura ($)', height=420, margin=dict(l=10, r=10, t=50, b=10))
+            st.plotly_chart(fig_top_cli, use_container_width=True)
+        else:
+            st.info("No hay datos de CLIENTE en los periodos seleccionados.")
+    else:
+        st.info("No se encontró la columna CLIENTE.")
+
+    # --- Top 10 localidades por $/kg ---
+    st.markdown("---")
+    st.markdown("### 📍 Top 10 localidades por $/kg")
+    st.caption("Filtrable solo por Periodos de Comparación. Usa el filtro de abajo para acotar por tipo de embarque.")
+    filtro_tr_loc = st.radio("Tipo de embarque", ["TR1", "TR2", "TR1 y TR2"], horizontal=True, index=2, key="tr_top_localidades")
+    if 'LOCALIDAD' in df_raw_periodos.columns:
+        df_loc_base = df_raw_periodos.copy()
+        if 'TIPO DE EMBARQUE' in df_loc_base.columns:
+            tr_norm = df_loc_base['TIPO DE EMBARQUE'].astype(str).str.strip().str.upper()
+            if filtro_tr_loc == "TR1":
+                df_loc_base = df_loc_base[tr_norm == 'TR1']
+            elif filtro_tr_loc == "TR2":
+                df_loc_base = df_loc_base[tr_norm == 'TR2']
+        loc_agg = df_loc_base.groupby('LOCALIDAD').agg(
+            **{'FLETE FACTURA': ('FLETE FACTURA', 'sum'), 'KG MOVIDOS': ('KG MOVIDOS', 'sum')}
+        )
+        loc_agg['$/kg'] = np.where(loc_agg['KG MOVIDOS'] > 0, loc_agg['FLETE FACTURA'] / loc_agg['KG MOVIDOS'], np.nan)
+        top_loc = loc_agg.dropna(subset=['$/kg']).nlargest(10, '$/kg').sort_values('$/kg')
+        if not top_loc.empty:
+            fig_top_loc = go.Figure(go.Bar(
+                x=top_loc['$/kg'], y=top_loc.index, orientation='h', marker_color='#188038',
+                text=[f"${v:,.2f}" for v in top_loc['$/kg']], textposition='outside'
+            ))
+            fig_top_loc.update_layout(title=f"Top 10 Localidades — $/kg ({filtro_tr_loc})", xaxis_title='$/kg', height=420, margin=dict(l=10, r=10, t=50, b=10))
+            st.plotly_chart(fig_top_loc, use_container_width=True)
+        else:
+            st.info("No hay localidades con datos suficientes de KG MOVIDOS.")
+    else:
+        st.info("No se encontró la columna LOCALIDAD.")
+
+    # --- Localidades con $/kg > $1.40 ---
+    st.markdown("---")
+    st.markdown("### 📍 Localidades con $/kg > $1.40")
+    st.caption("Filtrable solo por Periodos de Comparación. Usa el filtro de abajo para acotar por tipo de embarque. Muestra todas las localidades que superan el umbral (no solo Top 10).")
+    filtro_tr_loc2 = st.radio("Tipo de embarque", ["TR1", "TR2", "TR1 y TR2"], horizontal=True, index=2, key="tr_localidades_1_40")
+    if 'LOCALIDAD' in df_raw_periodos.columns:
+        df_loc_base2 = df_raw_periodos.copy()
+        if 'TIPO DE EMBARQUE' in df_loc_base2.columns:
+            tr_norm2 = df_loc_base2['TIPO DE EMBARQUE'].astype(str).str.strip().str.upper()
+            if filtro_tr_loc2 == "TR1":
+                df_loc_base2 = df_loc_base2[tr_norm2 == 'TR1']
+            elif filtro_tr_loc2 == "TR2":
+                df_loc_base2 = df_loc_base2[tr_norm2 == 'TR2']
+        loc_agg2 = df_loc_base2.groupby('LOCALIDAD').agg(
+            **{'FLETE FACTURA': ('FLETE FACTURA', 'sum'), 'KG MOVIDOS': ('KG MOVIDOS', 'sum')}
+        )
+        loc_agg2['$/kg'] = np.where(loc_agg2['KG MOVIDOS'] > 0, loc_agg2['FLETE FACTURA'] / loc_agg2['KG MOVIDOS'], np.nan)
+        loc_altas = loc_agg2.dropna(subset=['$/kg'])
+        loc_altas = loc_altas[loc_altas['$/kg'] > 1.40].sort_values('$/kg')
+        if not loc_altas.empty:
+            altura_din = max(300, 28 * len(loc_altas))
+            fig_loc_altas = go.Figure(go.Bar(
+                x=loc_altas['$/kg'], y=loc_altas.index, orientation='h', marker_color='#d93025',
+                text=[f"${v:,.2f}" for v in loc_altas['$/kg']], textposition='outside'
+            ))
+            fig_loc_altas.update_layout(title=f"Localidades con $/kg > $1.40 ({filtro_tr_loc2})", xaxis_title='$/kg', height=altura_din, margin=dict(l=10, r=10, t=50, b=10))
+            st.plotly_chart(fig_loc_altas, use_container_width=True)
+            st.caption(f"{len(loc_altas)} localidades superan $1.40/kg con el filtro seleccionado.")
+        else:
+            st.success("✅ Ninguna localidad supera $1.40/kg con el filtro seleccionado.")
+    else:
+        st.info("No se encontró la columna LOCALIDAD.")
+
 with tab2:
+    st.subheader("📦 Datos Generales")
+    st.caption("Vista global de la operación: estas gráficas solo se filtran por 🔍 Filtros Operativos (sidebar). No dependen de los Periodos de Comparación seleccionados.")
+
+    # --- Datos General - Anual (Mezcla de envío sin filtro de periodo) ---
+    st.markdown("### 🚚 Datos General - Anual — Mezcla de envío")
+    st.caption("Igual que la Mezcla de envío del comparativo, pero considerando TODOS los registros filtrados (sin recorte por periodo). Conteo agrupado por INDICE VIAJES.")
+    if 'TIPO DE TRANSPORTE' in df.columns:
+        if 'ID_VIAJE_UNICO' in df.columns:
+            conteo_anual = df.drop_duplicates('ID_VIAJE_UNICO').groupby('TIPO DE TRANSPORTE')['ID_VIAJE_UNICO'].nunique()
+        else:
+            conteo_anual = df['TIPO DE TRANSPORTE'].value_counts()
+        kg_anual = df.groupby('TIPO DE TRANSPORTE')['KG MOVIDOS'].sum() if 'KG MOVIDOS' in df.columns else pd.Series(dtype=float)
+        valor_anual = df.groupby('TIPO DE TRANSPORTE')['IMPORTE FACTURADO SIN IVA'].sum() if 'IMPORTE FACTURADO SIN IVA' in df.columns else pd.Series(dtype=float)
+        tarimas_anual = df.groupby('TIPO DE TRANSPORTE')['TARIMAS TOTALES POR VIAJE'].sum() if 'TARIMAS TOTALES POR VIAJE' in df.columns else pd.Series(dtype=float)
+
+        tipos_anual = sorted(set(conteo_anual.index) | set(kg_anual.index) | set(valor_anual.index) | set(tarimas_anual.index))
+        categorias_anual = ['Conteo', 'Kgs', 'Valor $', 'Tarimas']
+        formatos_anual = {'Conteo': lambda v: f"{v:,.0f}", 'Kgs': lambda v: f"{v:,.0f}", 'Valor $': lambda v: f"${v:,.0f}", 'Tarimas': lambda v: f"{v:,.0f}"}
+
+        fig_anual = go.Figure()
+        for tipo in tipos_anual:
+            valores_tipo = [conteo_anual.get(tipo, 0), kg_anual.get(tipo, 0), valor_anual.get(tipo, 0), tarimas_anual.get(tipo, 0)]
+            textos_tipo = [formatos_anual[cat](v) for cat, v in zip(categorias_anual, valores_tipo)]
+            fig_anual.add_trace(go.Bar(y=categorias_anual, x=valores_tipo, name=str(tipo), orientation='h', text=textos_tipo, textposition='inside'))
+        fig_anual.update_layout(title="Datos General - Anual", barmode='stack', barnorm='percent', height=340, margin=dict(t=50, b=20), legend=dict(orientation="h", y=1.08))
+        fig_anual.update_xaxes(showticklabels=False, title=None)
+        st.plotly_chart(fig_anual, use_container_width=True)
+    else:
+        st.info("No se encontró la columna TIPO DE TRANSPORTE.")
+
+    # --- Tendencia mensual de la mezcla ---
+    st.markdown("---")
+    st.markdown("### 📊 Tendencia mensual de la mezcla")
+    st.caption("Barras: composición % de unidades por mes (agrupado por INDICE VIAJES). Línea: costo por kg mensual = FLETE FACTURA / KGS MOVIDOS (agrupado por INDICE VIAJES).")
+    if {'MES FACTURA', 'TIPO DE TRANSPORTE', 'ID_VIAJE_UNICO'}.issubset(df.columns):
+        df_viaje_mes = df.groupby(['MES FACTURA', 'ID_VIAJE_UNICO']).agg(
+            **{'TIPO DE TRANSPORTE': ('TIPO DE TRANSPORTE', 'first'), 'FLETE FACTURA': ('FLETE FACTURA', 'sum'), 'KG MOVIDOS': ('KG MOVIDOS', 'sum')}
+        ).reset_index()
+        meses_orden = [m for m in NOMBRES_MESES if m in df_viaje_mes['MES FACTURA'].unique()]
+        if meses_orden:
+            comp_mensual = df_viaje_mes.groupby(['MES FACTURA', 'TIPO DE TRANSPORTE'])['ID_VIAJE_UNICO'].nunique().reset_index(name='Conteo')
+            tipos_mix = sorted(comp_mensual['TIPO DE TRANSPORTE'].unique())
+            costo_mensual = df_viaje_mes.groupby('MES FACTURA').agg(**{'FLETE FACTURA': ('FLETE FACTURA', 'sum'), 'KG MOVIDOS': ('KG MOVIDOS', 'sum')})
+            costo_mensual['Costo_kg'] = np.where(costo_mensual['KG MOVIDOS'] > 0, costo_mensual['FLETE FACTURA'] / costo_mensual['KG MOVIDOS'], np.nan)
+
+            fig_tend = make_subplots(specs=[[{"secondary_y": True}]])
+            for tipo in tipos_mix:
+                serie = comp_mensual[comp_mensual['TIPO DE TRANSPORTE'] == tipo].set_index('MES FACTURA')['Conteo']
+                fig_tend.add_trace(go.Bar(x=meses_orden, y=[serie.get(m, 0) for m in meses_orden], name=str(tipo)), secondary_y=False)
+            fig_tend.add_trace(go.Scatter(
+                x=meses_orden, y=[costo_mensual['Costo_kg'].get(m) for m in meses_orden],
+                name='Costo por kg ($/kg)', mode='lines+markers', line=dict(color='#202124', width=3), marker=dict(size=8)
+            ), secondary_y=True)
+            fig_tend.update_layout(title="Tendencia mensual de la mezcla", barmode='stack', barnorm='percent', height=420, margin=dict(t=60, b=20), legend=dict(orientation="h", y=1.15), xaxis_title="Mes")
+            fig_tend.update_yaxes(title_text="Participación (%)", secondary_y=False)
+            fig_tend.update_yaxes(title_text="Costo por kg ($/kg)", secondary_y=True)
+            st.plotly_chart(fig_tend, use_container_width=True)
+        else:
+            st.info("No hay datos de MES FACTURA disponibles.")
+    else:
+        st.info("Faltan columnas (MES FACTURA, TIPO DE TRANSPORTE o INDICE VIAJES) para este gráfico.")
+
+    # --- Evolución mensual ---
+    st.markdown("---")
+    st.markdown("### 📈 Evolución mensual")
+    st.caption("Barras: Flete Factura mensual en millones de $ (agrupado por INDICE VIAJES). Línea: costo por kg mensual = FLETE FACTURA / KGS MOVIDOS. Muestra cómo el volumen de viajes (INDICE VIAJES) influye en el $/kg.")
+    if {'MES FACTURA', 'ID_VIAJE_UNICO'}.issubset(df.columns):
+        df_viaje_mes2 = df.groupby(['MES FACTURA', 'ID_VIAJE_UNICO']).agg(
+            **{'FLETE FACTURA': ('FLETE FACTURA', 'sum'), 'KG MOVIDOS': ('KG MOVIDOS', 'sum')}
+        ).reset_index()
+        meses_orden2 = [m for m in NOMBRES_MESES if m in df_viaje_mes2['MES FACTURA'].unique()]
+        if meses_orden2:
+            evo_mensual = df_viaje_mes2.groupby('MES FACTURA').agg(**{'FLETE FACTURA': ('FLETE FACTURA', 'sum'), 'KG MOVIDOS': ('KG MOVIDOS', 'sum')})
+            evo_mensual['FLETE_MILLONES'] = evo_mensual['FLETE FACTURA'] / 1_000_000
+            evo_mensual['Costo_kg'] = np.where(evo_mensual['KG MOVIDOS'] > 0, evo_mensual['FLETE FACTURA'] / evo_mensual['KG MOVIDOS'], np.nan)
+
+            fig_evo = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_evo.add_trace(go.Bar(
+                x=meses_orden2, y=[evo_mensual['FLETE_MILLONES'].get(m, 0) for m in meses_orden2],
+                name='Flete Factura (millones $)', marker_color='#1a73e8',
+                text=[f"${evo_mensual['FLETE FACTURA'].get(m, 0):,.0f}" for m in meses_orden2], textposition='outside'
+            ), secondary_y=False)
+            fig_evo.add_trace(go.Scatter(
+                x=meses_orden2, y=[evo_mensual['Costo_kg'].get(m) for m in meses_orden2],
+                name='Costo por kg ($/kg)', mode='lines+markers', line=dict(color='#ea4335', width=3), marker=dict(size=9)
+            ), secondary_y=True)
+            fig_evo.update_yaxes(title_text='Flete Factura (millones $)', dtick=2, rangemode='tozero', secondary_y=False)
+            fig_evo.update_yaxes(title_text='Costo por kg ($/kg)', secondary_y=True)
+            fig_evo.update_layout(title="Evolución mensual", xaxis_title='Mes', height=380, margin=dict(t=60, b=20), legend=dict(orientation='h', y=1.12))
+            st.plotly_chart(fig_evo, use_container_width=True)
+        else:
+            st.info("No hay datos de MES FACTURA disponibles.")
+    else:
+        st.info("Faltan columnas (MES FACTURA o INDICE VIAJES) para este gráfico.")
+
+with tab3:
     # Contexto explícito para evitar ambigüedad en la auditoría.
     # En vista semanal también se muestra el/los meses a los que pertenece cada semana.
     def _periodo_auditoria(periodo, dframe):
@@ -771,6 +1050,7 @@ with tab2:
     periodo_actual_audit = _periodo_auditoria(per_b, df_b)
 
     st.subheader(f"🚨 Auditoría de Anomalías — {periodo_actual_audit} vs {periodo_base_audit}")
+
     st.caption(
         f"Compara los viajes de **{periodo_actual_audit}** contra la tarifa media "
         f"de **{periodo_base_audit}**."
@@ -864,13 +1144,7 @@ with tab2:
         st.plotly_chart(fig_costo_kg, use_container_width=True)
 
         st.markdown("### Gráfico de eficiencia")
-        capacidades_ideales = {
-            'TRAILER': 22000,
-            'TORTON': 11000,
-            'RABON': 8000,
-            'CAMIONETA 3.5': 3500,
-            'CAMIONETA 1.5': 1500
-        }
+        capacidades_ideales = CAPACIDADES_IDEALES
         # Para eficiencia, los fletes CONSOLIDADO se evalúan como una sola unidad
         # de carga. El resto de la auditoría conserva df_b_grouped sin cambios.
         def _unir_valores(serie):
@@ -1041,7 +1315,7 @@ with tab2:
         else:
             st.success(f"✅ No se encontraron viajes por encima de la tarifa mediana base en {modo_periodo} {per_b}.")
 
-with tab3:
+with tab4:
     var_tot = _var_pct(tot_b, tot_a)
     prompt_texto = f"""Actúa como un Gerente Senior de Logística y Cadena de Suministro.
 Analiza la siguiente variación de fletes, ventas e imprevistos financieros y genera un reporte ejecutivo.
